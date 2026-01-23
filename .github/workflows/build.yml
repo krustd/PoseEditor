@@ -5,12 +5,15 @@ on:
     tags:
       - "v*"
 
+permissions:
+  contents: write
+
 jobs:
   build:
     name: Build packages
     runs-on: ${{ matrix.os }}
     strategy:
-      fail-fast: false # <--- 关键修改1：防止一个失败导致全军覆没
+      fail-fast: false
       matrix:
         include:
           - os: windows-latest
@@ -31,48 +34,42 @@ jobs:
         uses: actions/setup-python@v4
         with:
           python-version: "3.9"
-          cache: "pip" # 开启缓存，加速后续构建
+          cache: "pip"
 
-      # --- Linux 特有依赖 ---
+      # --- Linux 依赖 ---
       - name: Install Linux dependencies
         if: matrix.os == 'ubuntu-latest'
         run: |
           sudo apt-get update --fix-missing
           sudo apt-get install -y portaudio19-dev python3-pyaudio ffmpeg
 
-      # --- macOS 特有依赖 ---
+      # --- macOS 依赖 ---
       - name: Install macOS dependencies
         if: matrix.os == 'macos-latest'
         run: |
           brew install portaudio ffmpeg
 
-      # --- 核心修改：分步安装依赖，优先安装轻量版 PyTorch ---
+      # --- Python 依赖 (优先安装 CPU 版 torch) ---
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-
-          # 关键修改2：优先安装 CPU 版本的 PyTorch (防止下载 2GB 的 CUDA 版导致超时)
           pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu --default-timeout=100
-
-          # 安装其他依赖 (requirements.txt 里如果有 torch 会自动跳过，因为上面已安装)
           pip install -r requirements.txt --default-timeout=100
-
-          # 安装打包工具
           pip install pyinstaller
 
+      # --- 打包 ---
       - name: Build with PyInstaller
-        # Windows/Linux 需包含相关库，Mac 稍微不同但通用配置通常可行
         run: |
           pyinstaller main.py --name=PoseEditor-${{ matrix.target }} --onefile --windowed --clean --collect-all whisper --collect-all tiktoken --collect-all pyside6
 
-      # --- 打包 Windows ---
+      # --- Windows 压缩 ---
       - name: Zip Windows Build
         if: matrix.os == 'windows-latest'
         run: |
           cd dist
           Compress-Archive -Path PoseEditor-windows.exe -DestinationPath PoseEditor-windows.zip
 
-      # --- 打包 Linux ---
+      # --- Linux 压缩 ---
       - name: Zip Linux Build
         if: matrix.os == 'ubuntu-latest'
         run: |
@@ -80,14 +77,14 @@ jobs:
           chmod +x PoseEditor-linux
           tar -czvf PoseEditor-linux.tar.gz PoseEditor-linux
 
-      # --- 打包 macOS ---
+      # --- macOS 压缩 ---
       - name: Zip macOS Build
         if: matrix.os == 'macos-latest'
         run: |
           cd dist
           zip -r PoseEditor-macos.zip PoseEditor-macos.app
 
-      # --- 上传结果 ---
+      # --- 上传发布 ---
       - name: Upload Release Assets
         uses: softprops/action-gh-release@v1
         if: startsWith(github.ref, 'refs/tags/')
