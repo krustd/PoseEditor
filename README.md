@@ -14,16 +14,43 @@
 
 ## 安装与运行
 
-1. 确保已安装Python 3.9或更高版本
-2. 安装依赖：`pip install -r requirements.txt` 或 `uv sync`（如果使用uv）
-3. 运行程序：`python main.py`
+1. **确保已安装Python 3.9或更高版本**
+2. **必须安装FFmpeg**（语音识别功能的必要依赖）：
+   - Windows: 下载FFmpeg并添加到系统PATH环境变量
+   - macOS: `brew install ffmpeg`
+   - Linux (Ubuntu/Debian): `sudo apt-get install ffmpeg`
+   - 验证安装: 在命令行运行 `ffmpeg -version`
+3. 安装Python依赖：`pip install -r requirements.txt` 或 `uv sync`（如果使用uv）
+4. 运行程序：`python main.py`
 
 ### 依赖项
 
 - PySide6：图形界面框架
-- OpenAI Whisper：语音识别模型
-- PyAudio：音频录制
+- OpenAI Whisper：语音识别模型（需要系统安装FFmpeg）
+- PyAudio：音频录制（可能需要系统级依赖）
 - NumPy：数值计算
+
+### PyAudio 跨平台安装指南
+
+PyAudio 在不同平台上可能需要额外的系统级依赖：
+
+#### Windows
+- 通常可以直接安装：`pip install pyaudio`
+- 如果失败，尝试使用预编译的wheel包：`pip pip install pipwin` 然后 `pipwin install pyaudio`
+
+#### macOS
+- 使用Homebrew安装PortAudio：`brew install portaudio`
+- 然后安装PyAudio：`pip install pyaudio`
+
+#### Linux (Ubuntu/Debian)
+- 安装PortAudio开发库：`sudo apt-get install portaudio19-dev python3-pyaudio`
+- 或使用pip安装：`pip install pyaudio`
+
+#### Linux (CentOS/RHEL/Fedora)
+- 安装必要的开发包：`sudo yum install portaudio-devel` 或 `sudo dnf install portaudio-devel`
+- 然后安装PyAudio：`pip install pyaudio`
+
+如果安装过程中遇到错误，请确保系统已安装C编译器和Python开发包。
 
 ## 界面布局
 

@@ -1,7 +1,8 @@
 import os
 import sys
 import requests
-import whisper 
+import subprocess
+import whisper
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QLabel, QProgressBar, QMessageBox, QPushButton
 )
@@ -114,10 +115,39 @@ class ModelLoaderDialog(QDialog):
         QMessageBox.critical(self, "下载失败", f"无法下载模型：\n{msg}")
         self.reject()
 
+def check_ffmpeg_available():
+    """
+    检查系统是否安装了FFmpeg
+    返回: bool - True表示FFmpeg可用，False表示不可用
+    """
+    try:
+        # 尝试运行ffmpeg -version命令
+        subprocess.run(["ffmpeg", "-version"],
+                      stdout=subprocess.PIPE,
+                      stderr=subprocess.PIPE,
+                      check=True)
+        return True
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return False
+
 def ensure_model_ready(model_name="base"):
     """
     外部调用接口
     """
+    # 0. 检查FFmpeg是否可用
+    if not check_ffmpeg_available():
+        QMessageBox.warning(
+            None,
+            "FFmpeg 未安装",
+            "语音识别功能需要安装FFmpeg才能正常工作。\n\n"
+            "请安装FFmpeg并确保它已添加到系统PATH环境变量中：\n"
+            "• Windows: 下载FFmpeg并添加到PATH\n"
+            "• macOS: brew install ffmpeg\n"
+            "• Linux: sudo apt-get install ffmpeg\n\n"
+            "安装后请重启程序。"
+        )
+        return False
+    
     # 1. 快速检查：如果文件存在且大小正常(>0)，直接通过，不弹窗
     url = MODEL_URLS.get(model_name)
     if url:

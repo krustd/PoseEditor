@@ -23,11 +23,16 @@ class TranscribeWorker(QObject):
         self.model_size = model_size
 
     def run(self):
+        global _LOADED_WHISPER_MODEL, _LOADED_MODEL_NAME
         try:
-            # 这里加载本地模型，第一次运行会自动下载
-            # available models: tiny, base, small, medium, large
-            model = whisper.load_model(self.model_size)
-            result = model.transcribe(self.audio_path, language="zh")
+            # 只有当模型未加载，或者需要切换不同大小的模型时才重新加载
+            if _LOADED_WHISPER_MODEL is None or _LOADED_MODEL_NAME != self.model_size:
+                print(f"Loading Whisper model: {self.model_size}...") # 方便调试
+                _LOADED_WHISPER_MODEL = whisper.load_model(self.model_size)
+                _LOADED_MODEL_NAME = self.model_size
+            
+            # 使用全局缓存的模型
+            result = _LOADED_WHISPER_MODEL.transcribe(self.audio_path, language="zh")
             text = result["text"].strip()
             self.finished.emit(text)
         except Exception as e:
