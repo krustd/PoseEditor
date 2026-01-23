@@ -7,7 +7,8 @@ from typing import List, Tuple, Optional, Dict, Any
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
     QLabel, QStatusBar, QListWidget, QListWidgetItem, QPushButton,
-    QFileDialog, QMessageBox, QSplitter, QFrame, QSpinBox, QGroupBox
+    QFileDialog, QMessageBox, QSplitter, QFrame, QSpinBox, QGroupBox,
+    QButtonGroup, QGridLayout  # 新增引用
 )
 from PySide6.QtCore import Qt, QPointF, QRectF, Signal, QObject
 from PySide6.QtGui import (
@@ -504,18 +505,53 @@ class PoseEditor(QMainWindow):
         
         layout.addWidget(file_group)
         
-        # --- [新增功能 3] 评分区 ---
+        # --- [修改] 评分区: 替换 SpinBox 为 0-10 按钮组 ---
         score_group = QGroupBox("姿态美学评分")
-        score_layout = QHBoxLayout(score_group)
-        score_layout.addWidget(QLabel("评分 (-1=未评):"))
+        score_container_layout = QVBoxLayout(score_group)
         
-        self.score_spin = QSpinBox()
-        self.score_spin.setRange(-1, 10)
-        self.score_spin.setValue(-1)
-        # 移除特殊文本，直接显示数字
-        self.score_spin.valueChanged.connect(self.on_score_changed)
-        score_layout.addWidget(self.score_spin)
+        # 使用 Grid 布局放置按钮
+        score_grid = QGridLayout()
+        score_grid.setSpacing(5)
         
+        self.score_group_btn = QButtonGroup(self)
+        self.score_group_btn.setExclusive(True)
+        self.score_group_btn.idClicked.connect(self.on_score_button_clicked)
+        
+        # 创建 0-10 的按钮
+        for i in range(11):
+            btn = QPushButton(str(i))
+            btn.setCheckable(True)
+            btn.setFixedSize(30, 30) # 设置固定大小，类似方块
+            
+            # 设置样式：选中时变蓝，未选中时普通
+            btn.setStyleSheet("""
+                QPushButton { background-color: #f0f0f0; border: 1px solid #ccc; }
+                QPushButton:checked { background-color: #0078d7; color: white; border: 1px solid #005a9e; }
+            """)
+            
+            self.score_group_btn.addButton(btn, i) # id = 分数
+            
+            # 计算行和列 (两行显示: 0-5, 6-10)
+            row = 0 if i <= 5 else 1
+            col = i if i <= 5 else i - 6
+            score_grid.addWidget(btn, row, col)
+            
+        # 添加一个 "N/A" 按钮用来表示 -1
+        na_btn = QPushButton("N/A")
+        na_btn.setCheckable(True)
+        na_btn.setFixedSize(30, 30)
+        na_btn.setToolTip("未评分")
+        na_btn.setStyleSheet("""
+            QPushButton { background-color: #f0f0f0; border: 1px solid #ccc; color: gray; }
+            QPushButton:checked { background-color: #999; color: white; }
+        """)
+        self.score_group_btn.addButton(na_btn, 11) 
+        score_grid.addWidget(na_btn, 1, 5)
+        
+        # 默认选中 N/A 按钮 (表示未评分)
+        na_btn.setChecked(True)
+            
+        score_container_layout.addLayout(score_grid)
         layout.addWidget(score_group)
         
         # --- 关键点列表 ---
@@ -544,7 +580,8 @@ class PoseEditor(QMainWindow):
             "• 左键: 选中/拖拽 (Ctrl+点击=瞬移)\n"
             "• 右键: 平移画布 | 滚轮: 缩放\n"
             "• A: 遮挡 | D: 不可见 | S: 可见\n"
-            "• Tab: 切换点 | Del: 移至Ignore"
+            "• Tab/Shift+Tab: 切换点 | Delete: 移至Ignore\n"
+            "• Ctrl+Z/Y: 撤销/重做 | Ctrl+S: 保存"
         )
         help_text.setStyleSheet("color: gray; font-size: 11px;")
         layout.addWidget(help_text)
@@ -602,9 +639,13 @@ class PoseEditor(QMainWindow):
                 self.update_status()
                 break
     
-    def on_score_changed(self, value):
-        """评分改变时更新数据"""
-        self.canvas.pose_data.score = value
+    def on_score_button_clicked(self, score_id):
+        """[修改] 评分按钮点击回调"""
+        if score_id == 11:
+            self.canvas.pose_data.score = -1
+        else:
+            self.canvas.pose_data.score = score_id
+
         
     def update_status(self):
         if self.current_image_path:
@@ -677,10 +718,22 @@ class PoseEditor(QMainWindow):
         self.canvas.set_pose_data(pose_data)
         self.current_annotation_path = str(json_path)
         
-        # 更新 UI 显示评分
-        self.score_spin.blockSignals(True) # 防止触发 onChanged 导致数据被误改
-        self.score_spin.setValue(pose_data.score)
-        self.score_spin.blockSignals(False)
+        current_score = pose_data.score
+        if current_score is not None:
+            try:
+                current_score = int(current_score)
+            except ValueError:
+                current_score = -1
+        else:
+            current_score = -1
+        target_btn_id = 11 if current_score == -1 else current_score
+        btn = self.score_group_btn.button(target_btn_id)
+        
+        if btn:
+            btn.setChecked(True)
+        else:
+            fallback_btn = self.score_group_btn.button(11)
+            if fallback_btn: fallback_btn.setChecked(True)
         
         if self.canvas.pose_data.keypoints:
             # 默认选中第一个点
