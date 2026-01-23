@@ -16,6 +16,10 @@ from PySide6.QtGui import (
     QMouseEvent, QKeyEvent, QWheelEvent, QAction
 )
 
+from voice_input import VoiceInputWidget
+from model_loader import ensure_model_ready
+
+CURRENT_MODEL = "medium"
 
 class Keypoint:
     """关键点数据模型"""
@@ -45,12 +49,16 @@ class PoseData:
     """姿态数据模型 - 新增评分字段"""
     def __init__(self):
         self.keypoints = self._init_keypoints()
-        self.score = -1  # 新增：默认评分为 -1 (代表未评分)
+        self.score = -1
+        self.background_desc = "" 
+        self.character_desc = ""
         
     def copy(self) -> 'PoseData':
         new_pose = PoseData()
         new_pose.keypoints = [kp.copy() for kp in self.keypoints]
         new_pose.score = self.score
+        new_pose.background_desc = self.background_desc
+        new_pose.character_desc = self.character_desc
         return new_pose
         
     def _init_keypoints(self) -> List[Keypoint]:
@@ -64,14 +72,19 @@ class PoseData:
     
     def to_dict(self) -> Dict[str, Any]:
         return {
-            "score": self.score,  # 保存评分
+            "score": self.score,
+            "background_desc": self.background_desc,
+            "character_desc": self.character_desc,
             "keypoints": [kp.to_dict() for kp in self.keypoints]
         }
     
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'PoseData':
         pose = cls()
-        pose.score = data.get("score", -1)  # 读取评分
+        pose.score = data.get("score", -1)
+        pose.background_desc = data.get("background_desc", "")
+        pose.character_desc = data.get("character_desc", "")
+        
         for i, kp_data in enumerate(data.get("keypoints", [])):
             if i < len(pose.keypoints):
                 pose.keypoints[i] = Keypoint.from_dict(kp_data)
@@ -554,6 +567,22 @@ class PoseEditor(QMainWindow):
         score_container_layout.addLayout(score_grid)
         layout.addWidget(score_group)
         
+         # --- 图像识别 ---
+        desc_group = QGroupBox("图像描述 (支持语音)")
+        desc_layout = QVBoxLayout(desc_group)
+        # 背景描述组件
+        self.bg_input = VoiceInputWidget("背景描述:", "例如：街道，天气晴朗，有建筑物...",model_name=CURRENT_MODEL)
+        # 当文字改变时，实时更新数据模型，防止忘记保存时数据丢失
+        self.bg_input.text_changed.connect(lambda t: setattr(self.canvas.pose_data, 'background_desc', t))
+        desc_layout.addWidget(self.bg_input)
+        
+        # 人物描述组件
+        self.char_input = VoiceInputWidget("人物描述:", "例如：穿着红色外套，正在跑步...",model_name=CURRENT_MODEL)
+        self.char_input.text_changed.connect(lambda t: setattr(self.canvas.pose_data, 'character_desc', t))
+        desc_layout.addWidget(self.char_input)
+        
+        layout.addWidget(desc_group)
+
         # --- 关键点列表 ---
         layout.addWidget(QLabel("关键点列表:"))
         self.keypoint_list = QListWidget()
@@ -735,6 +764,9 @@ class PoseEditor(QMainWindow):
             fallback_btn = self.score_group_btn.button(11)
             if fallback_btn: fallback_btn.setChecked(True)
         
+        self.bg_input.set_text(pose_data.background_desc)
+        self.char_input.set_text(pose_data.character_desc)
+
         if self.canvas.pose_data.keypoints:
             # 默认选中第一个点
             first_kp = self.canvas.pose_data.keypoints[0]
@@ -871,6 +903,8 @@ class PoseEditor(QMainWindow):
 
 def main():
     app = QApplication(sys.argv)
+    if not ensure_model_ready(model_name=CURRENT_MODEL): 
+        sys.exit(0)
     editor = PoseEditor()
     editor.show()
     sys.exit(app.exec())
