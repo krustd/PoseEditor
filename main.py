@@ -1,14 +1,15 @@
 import sys
 import json
+import shutil
 from pathlib import Path
 from typing import List, Tuple, Optional, Dict, Any
 
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
     QLabel, QStatusBar, QListWidget, QListWidgetItem, QPushButton,
-    QFileDialog, QMessageBox, QSplitter, QFrame
+    QFileDialog, QMessageBox, QSplitter, QFrame, QSpinBox, QGroupBox
 )
-from PySide6.QtCore import Qt, QPointF, QRectF, Signal, QTimer, QObject
+from PySide6.QtCore import Qt, QPointF, QRectF, Signal, QObject
 from PySide6.QtGui import (
     QPixmap, QImage, QPainter, QPen, QBrush, QColor, 
     QMouseEvent, QKeyEvent, QWheelEvent, QAction
@@ -24,7 +25,6 @@ class Keypoint:
         self.visibility = visibility  # 0: 不可见/未标记, 1: 遮挡, 2: 可见
         
     def copy(self) -> 'Keypoint':
-        """创建关键点的副本"""
         return Keypoint(self.name, self.x, self.y, self.visibility)
         
     def to_dict(self) -> Dict[str, Any]:
@@ -41,18 +41,18 @@ class Keypoint:
 
 
 class PoseData:
-    """姿态数据模型"""
+    """姿态数据模型 - 新增评分字段"""
     def __init__(self):
         self.keypoints = self._init_keypoints()
+        self.score = -1  # 新增：默认评分为 -1 (代表未评分)
         
     def copy(self) -> 'PoseData':
-        """创建姿态数据的副本"""
         new_pose = PoseData()
         new_pose.keypoints = [kp.copy() for kp in self.keypoints]
+        new_pose.score = self.score
         return new_pose
         
     def _init_keypoints(self) -> List[Keypoint]:
-        """初始化COCO格式的17个关键点"""
         keypoint_names = [
             "nose", "left_eye", "right_eye", "left_ear", "right_ear",
             "left_shoulder", "right_shoulder", "left_elbow", "right_elbow",
@@ -63,45 +63,54 @@ class PoseData:
     
     def to_dict(self) -> Dict[str, Any]:
         return {
+            "score": self.score,  # 保存评分
             "keypoints": [kp.to_dict() for kp in self.keypoints]
         }
     
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'PoseData':
         pose = cls()
+        pose.score = data.get("score", -1)  # 读取评分
         for i, kp_data in enumerate(data.get("keypoints", [])):
             if i < len(pose.keypoints):
                 pose.keypoints[i] = Keypoint.from_dict(kp_data)
         return pose
+        
+    def has_valid_keypoints(self) -> bool:
+        """检查是否有有效的关键点坐标（不全为0）"""
+        for kp in self.keypoints:
+            if kp.x > 1 and kp.y > 1: # 简单的阈值判断
+                return True
+        return False
+        
+    def get_bounding_box(self) -> Tuple[float, float, float, float]:
+        """获取所有非0关键点的包围盒 (min_x, min_y, max_x, max_y)"""
+        xs = [kp.x for kp in self.keypoints if kp.x > 1]
+        ys = [kp.y for kp in self.keypoints if kp.y > 1]
+        
+        if not xs or not ys:
+            return (0, 0, 0, 0)
+            
+        return (min(xs), min(ys), max(xs), max(ys))
 
 
 class UndoCommand:
-    """撤销命令基类"""
-    def undo(self):
-        pass
-        
-    def redo(self):
-        pass
+    def undo(self): pass
+    def redo(self): pass
 
 
 class KeypointChangeCommand(UndoCommand):
-    """关键点变更命令 - 修改版"""
     def __init__(self, pose_data: PoseData, keypoint_index: int, old_state: Keypoint, new_state: Keypoint):
         self.pose_data = pose_data
         self.keypoint_index = keypoint_index
-        # 保存状态的数据副本，而不是直接保存对象引用
         self.old_state = old_state
         self.new_state = new_state
         
     def _update_keypoint(self, state: Keypoint):
-        """辅助方法：只更新属性，不替换对象"""
-        # 获取当前列表里真正的那个对象
         current_kp = self.pose_data.keypoints[self.keypoint_index]
-        # 更新它的属性
         current_kp.x = state.x
         current_kp.y = state.y
         current_kp.visibility = state.visibility
-        # 注意：不要修改 name，也不要替换整个 current_kp 对象
         
     def undo(self):
         self._update_keypoint(self.old_state)
@@ -111,7 +120,6 @@ class KeypointChangeCommand(UndoCommand):
 
 
 class UndoStack(QObject):
-    """撤销栈"""
     can_undo_changed = Signal(bool)
     can_redo_changed = Signal(bool)
     
@@ -121,40 +129,30 @@ class UndoStack(QObject):
         self.redo_stack = []
         
     def push(self, command: UndoCommand):
-        """推送新命令"""
         self.undo_stack.append(command)
         self.redo_stack.clear()
         self.can_undo_changed.emit(True)
         self.can_redo_changed.emit(False)
         
     def undo(self) -> bool:
-        """撤销"""
-        if not self.undo_stack:
-            return False
-            
+        if not self.undo_stack: return False
         command = self.undo_stack.pop()
         command.undo()
         self.redo_stack.append(command)
-        
         self.can_undo_changed.emit(bool(self.undo_stack))
         self.can_redo_changed.emit(True)
         return True
         
     def redo(self) -> bool:
-        """重做"""
-        if not self.redo_stack:
-            return False
-            
+        if not self.redo_stack: return False
         command = self.redo_stack.pop()
         command.redo()
         self.undo_stack.append(command)
-        
         self.can_undo_changed.emit(True)
         self.can_redo_changed.emit(bool(self.redo_stack))
         return True
         
     def clear(self):
-        """清空撤销栈"""
         self.undo_stack.clear()
         self.redo_stack.clear()
         self.can_undo_changed.emit(False)
@@ -162,8 +160,7 @@ class UndoStack(QObject):
 
 
 class Canvas(QWidget):
-    """画布组件，用于显示图片和关键点"""
-    keypoint_selected = Signal(str)  # 关键点被选中信号
+    keypoint_selected = Signal(str)
     
     def __init__(self):
         super().__init__()
@@ -180,12 +177,11 @@ class Canvas(QWidget):
         self.undo_stack = UndoStack()
         self.drag_start_pos = None
         
-        # 骨架连接关系（COCO格式）
         self.skeleton = [
-            (0, 1), (0, 2), (1, 3), (2, 4),  # 头部
-            (5, 6), (5, 7), (7, 9), (6, 8), (8, 10),  # 上肢
-            (5, 11), (6, 12), (11, 12),  # 躯干
-            (11, 13), (13, 15), (12, 14), (14, 15)  # 下肢
+            (0, 1), (0, 2), (1, 3), (2, 4),
+            (5, 6), (5, 7), (7, 9), (6, 8), (8, 10),
+            (5, 11), (6, 12), (11, 12),
+            (11, 13), (13, 15), (12, 14), (14, 15)
         ]
         
         self.setMinimumSize(800, 600)
@@ -193,178 +189,174 @@ class Canvas(QWidget):
         self.setFocusPolicy(Qt.StrongFocus)
         
     def set_image(self, image: QImage):
-        """设置显示的图片"""
         self.image = image
-        self.fit_to_window()
+        # 注意：这里不再自动调用 fit_to_window，由外部根据数据情况决定调用哪个缩放方法
         self.update()
         
     def set_pose_data(self, pose_data: PoseData):
-        """设置姿态数据"""
         self.pose_data = pose_data
         self.update()
         
     def fit_to_window(self):
-        """适应窗口大小"""
-        if not self.image:
-            return
-            
+        """适应窗口大小 (显示全图)"""
+        if not self.image: return
         widget_size = self.size()
         image_size = self.image.size()
-        
         scale_x = widget_size.width() / image_size.width()
         scale_y = widget_size.height() / image_size.height()
-        self.scale = min(scale_x, scale_y) * 0.9  # 留10%边距
-        
-        # 居中显示
+        self.scale = min(scale_x, scale_y) * 0.9
         scaled_size = image_size * self.scale
         self.offset = QPointF(
             (widget_size.width() - scaled_size.width()) / 2,
             (widget_size.height() - scaled_size.height()) / 2
         )
+        self.update()
+
+    def focus_on_pose(self):
+        """[新增功能] 聚焦于姿态所在的局部区域"""
+        if not self.image or not self.pose_data.has_valid_keypoints():
+            self.fit_to_window()
+            return
+
+        min_x, min_y, max_x, max_y = self.pose_data.get_bounding_box()
         
+        # 计算包围盒宽高
+        bbox_w = max_x - min_x
+        bbox_h = max_y - min_y
+        
+        # 如果包围盒太小，回退到全图
+        if bbox_w < 10 or bbox_h < 10:
+            self.fit_to_window()
+            return
+
+        # 增加一些边距 (padding)
+        padding_x = bbox_w * 0.5  # 左右各留50%宽度的空间
+        padding_y = bbox_h * 0.5
+        
+        target_x = min_x - padding_x / 2
+        target_y = min_y - padding_y / 2
+        target_w = bbox_w + padding_x
+        target_h = bbox_h + padding_y
+
+        widget_size = self.size()
+        
+        # 计算缩放比例
+        scale_x = widget_size.width() / target_w
+        scale_y = widget_size.height() / target_h
+        new_scale = min(scale_x, scale_y)
+        
+        # 限制最大放大倍数，防止模糊过度
+        self.scale = min(new_scale, 5.0) 
+        
+        # 计算偏移量：使得 target_rect 的中心对齐 widget 的中心
+        # image_pixel * scale + offset = screen_pixel
+        # offset = screen_pixel_center - image_pixel_center * scale
+        
+        center_x = target_x + target_w / 2
+        center_y = target_y + target_h / 2
+        
+        self.offset = QPointF(
+            widget_size.width() / 2 - center_x * self.scale,
+            widget_size.height() / 2 - center_y * self.scale
+        )
+        
+        self.update()
+
     def image_to_widget(self, point: QPointF) -> QPointF:
-        """图片坐标转窗口坐标"""
         return QPointF(point.x() * self.scale + self.offset.x(),
                       point.y() * self.scale + self.offset.y())
     
     def widget_to_image(self, point: QPointF) -> QPointF:
-        """窗口坐标转图片坐标"""
         return QPointF((point.x() - self.offset.x()) / self.scale,
                       (point.y() - self.offset.y()) / self.scale)
     
     def get_keypoint_at(self, pos: QPointF) -> Optional[Keypoint]:
-        """获取指定位置的关键点"""
-        if not self.image:
-            return None
-            
-        image_pos = self.widget_to_image(pos)
-        
+        if not self.image: return None
         for kp in self.pose_data.keypoints:
-            # if kp.visibility == 0:  
-            #     continue
-                
             kp_pos = self.image_to_widget(QPointF(kp.x, kp.y))
             distance = (kp_pos - pos).manhattanLength()
-            
             if distance < 10:  
                 return kp
-                
         return None
     
     def paintEvent(self, event):
-        """绘制事件"""
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
-        
-        # 绘制背景
         painter.fillRect(self.rect(), QColor(50, 50, 50))
         
-        if not self.image:
-            return
+        if not self.image: return
             
-        # 绘制图片
         painter.save()
         painter.translate(self.offset)
         painter.scale(self.scale, self.scale)
         painter.drawImage(0, 0, self.image)
         painter.restore()
         
-        # 绘制骨架和关键点
         if self.show_skeleton:
             self.draw_skeleton(painter)
         self.draw_keypoints(painter)
         
     def draw_skeleton(self, painter: QPainter):
-        """绘制骨架连线"""
-        if not self.image:
-            return
-            
+        if not self.image: return
         painter.save()
         painter.translate(self.offset)
         painter.scale(self.scale, self.scale)
-        
         pen = QPen(QColor(100, 200, 100, 150), 2)
         painter.setPen(pen)
-        
         for start_idx, end_idx in self.skeleton:
             start_kp = self.pose_data.keypoints[start_idx]
             end_kp = self.pose_data.keypoints[end_idx]
-            
-            # 只有当两个点都可见时才绘制连线
             if start_kp.visibility > 0 and end_kp.visibility > 0:
                 painter.drawLine(QPointF(start_kp.x, start_kp.y), 
                                QPointF(end_kp.x, end_kp.y))
-        
         painter.restore()
         
     def draw_keypoints(self, painter: QPainter):
-        """绘制关键点"""
-        if not self.image:
-            return
-            
+        if not self.image: return
         painter.save()
         painter.translate(self.offset)
         painter.scale(self.scale, self.scale)
         
         for i, kp in enumerate(self.pose_data.keypoints):
-            # === 修改点 1: 删除了 "if kp.visibility == 0: continue" ===
-            # 现在即使是不可见的点也会被绘制，方便你找到它们
-            
-            # === 修改点 2: 定义状态颜色 ===
-            if kp.visibility == 2:  # 可见 -> 绿色
+            if kp.visibility == 2:
                 color = QColor(0, 255, 0, int(255 * self.keypoint_opacity))
                 border_color = Qt.black
-            elif kp.visibility == 1:  # 遮挡 -> 橙色
+            elif kp.visibility == 1:
                 color = QColor(255, 165, 0, int(255 * self.keypoint_opacity))
                 border_color = Qt.black
-            else:  # [新增] 不可见/未标记 (0) -> 红色 (带透明度)
-                # 使用红色表示"待处理"，方便在图片上通过颜色区分进度
+            else:
                 color = QColor(255, 0, 0, 150) 
-                border_color = Qt.white  # 使用白色边框增强对比度
+                border_color = Qt.white
                 
-            # 如果是选中的点，覆盖为高亮黄色
             if self.selected_keypoint == kp:
                 color = QColor(255, 255, 0)
                 border_color = Qt.black
                 
             painter.setBrush(QBrush(color))
-            # 设置边框颜色（未标记的点用白边框更显眼）
             painter.setPen(QPen(border_color, 1))
-            
-            # 绘制圆点
-            radius = 5 / self.scale  # 固定屏幕大小
+            radius = 5 / self.scale 
             painter.drawEllipse(QPointF(kp.x, kp.y), radius, radius)
             
         painter.restore()
         
     def mousePressEvent(self, event: QMouseEvent):
-        """鼠标按下事件 - 修改版"""
         if event.button() == Qt.LeftButton:
-            # === 新增逻辑：按住 Ctrl 键 + 点击 = 瞬移当前选中的点 ===
             if event.modifiers() & Qt.ControlModifier:
                 if self.selected_keypoint:
-                    # 1. 计算鼠标点击在图片上的坐标
                     image_pos = self.widget_to_image(event.pos())
-                    
-                    # 2. 准备撤销数据（记录移动前的状态）
                     keypoint_index = self.pose_data.keypoints.index(self.selected_keypoint)
                     old_state = self.selected_keypoint.copy()
                     
-                    # 3. 修改关键点坐标并设为可见
                     self.selected_keypoint.x = max(0, image_pos.x())
                     self.selected_keypoint.y = max(0, image_pos.y())
-                    self.selected_keypoint.visibility = 2  # 强制设为可见
+                    self.selected_keypoint.visibility = 2
                     
-                    # 4. 记录到撤销栈
                     new_state = self.selected_keypoint.copy()
                     command = KeypointChangeCommand(self.pose_data, keypoint_index, old_state, new_state)
                     self.undo_stack.push(command)
-                    
                     self.update()
-                    return  # 处理完毕，直接返回，不再执行下面的选中逻辑
-            # ====================================================
+                    return
 
-            # 原有的选中逻辑（如果没有按 Ctrl）
             self.selected_keypoint = self.get_keypoint_at(event.pos())
             if self.selected_keypoint:
                 self.dragging = True
@@ -377,29 +369,21 @@ class Canvas(QWidget):
             self.last_pos = event.pos()
             
     def mouseMoveEvent(self, event: QMouseEvent):
-        """鼠标移动事件"""
         if self.dragging and self.selected_keypoint:
-            # 拖拽关键点
             image_pos = self.widget_to_image(event.pos())
             self.selected_keypoint.x = max(0, image_pos.x())
             self.selected_keypoint.y = max(0, image_pos.y())
-            
-            # 拖拽时默认设为可见
             if self.selected_keypoint.visibility == 0:
                 self.selected_keypoint.visibility = 2
-                
             self.update()
         elif self.panning:
-            # 平移画布
             delta = event.pos() - self.last_pos
             self.offset += delta
             self.last_pos = event.pos()
             self.update()
             
     def mouseReleaseEvent(self, event: QMouseEvent):
-        """鼠标释放事件"""
         if event.button() == Qt.LeftButton and self.dragging and self.selected_keypoint and self.drag_start_pos:
-            # 创建撤销命令
             keypoint_index = self.pose_data.keypoints.index(self.selected_keypoint)
             old_state = Keypoint(
                 self.selected_keypoint.name,
@@ -408,10 +392,8 @@ class Canvas(QWidget):
                 self.selected_keypoint.visibility
             )
             new_state = self.selected_keypoint.copy()
-            
             command = KeypointChangeCommand(self.pose_data, keypoint_index, old_state, new_state)
             self.undo_stack.push(command)
-            
             self.dragging = False
             self.drag_start_pos = None
         elif event.button() == Qt.LeftButton:
@@ -420,59 +402,34 @@ class Canvas(QWidget):
             self.panning = False
             
     def wheelEvent(self, event: QWheelEvent):
-        """滚轮事件 - 缩放"""
-        if not self.image:
-            return
-            
-        # 获取鼠标位置对应的图片坐标
+        if not self.image: return
         mouse_pos = event.position()
         image_pos_before = self.widget_to_image(mouse_pos)
-        
-        # 计算新的缩放比例
         delta = event.angleDelta().y() / 120
         scale_factor = 1.1 if delta > 0 else 0.9
         new_scale = self.scale * scale_factor
         
-        # 限制缩放范围
-        if 0.1 <= new_scale <= 5.0:
-            # 调整偏移以保持鼠标位置不变
+        if 0.1 <= new_scale <= 20.0: # 允许更大的放大倍数
             self.scale = new_scale
             image_pos_after = self.widget_to_image(mouse_pos)
-            
             offset_delta = QPointF(
                 (image_pos_before.x() - image_pos_after.x()) * self.scale,
                 (image_pos_before.y() - image_pos_after.y()) * self.scale
             )
             self.offset += offset_delta
-            
             self.update()
             
     def keyPressEvent(self, event: QKeyEvent):
-        """键盘事件"""
-        if not self.selected_keypoint:
-            return
-            
+        if not self.selected_keypoint: return
         key = event.key()
         keypoint_index = self.pose_data.keypoints.index(self.selected_keypoint)
         old_state = self.selected_keypoint.copy()
         
-        if key == Qt.Key_A:
-            # A键 - 标记为遮挡
-            self.selected_keypoint.visibility = 1
-            new_state = self.selected_keypoint.copy()
-            command = KeypointChangeCommand(self.pose_data, keypoint_index, old_state, new_state)
-            self.undo_stack.push(command)
-            self.update()
-        elif key == Qt.Key_D:
-            # D键 - 标记为不可见
-            self.selected_keypoint.visibility = 0
-            new_state = self.selected_keypoint.copy()
-            command = KeypointChangeCommand(self.pose_data, keypoint_index, old_state, new_state)
-            self.undo_stack.push(command)
-            self.update()
-        elif key == Qt.Key_S:
-            # S键 - 重置到可见状态
-            self.selected_keypoint.visibility = 2
+        if key in [Qt.Key_A, Qt.Key_D, Qt.Key_S]:
+            if key == Qt.Key_A: self.selected_keypoint.visibility = 1
+            elif key == Qt.Key_D: self.selected_keypoint.visibility = 0
+            elif key == Qt.Key_S: self.selected_keypoint.visibility = 2
+            
             new_state = self.selected_keypoint.copy()
             command = KeypointChangeCommand(self.pose_data, keypoint_index, old_state, new_state)
             self.undo_stack.push(command)
@@ -480,100 +437,99 @@ class Canvas(QWidget):
 
 
 class PoseEditor(QMainWindow):
-    """姿态标注编辑器主窗口"""
-    
     def __init__(self):
         super().__init__()
         self.current_image_path = None
         self.current_annotation_path = None
         self.image_files = []
         self.current_index = 0
-        self.undo_stack = []
-        self.redo_stack = []
         
         self.init_ui()
-        self.load_images()
         
     def init_ui(self):
-        """初始化UI"""
-        self.setWindowTitle("姿态标注修正工具")
-        self.setGeometry(100, 100, 1200, 800)
+        self.setWindowTitle("姿态标注修正工具 v2.0")
+        self.setGeometry(100, 100, 1300, 850)
         
-        # 创建中央部件
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
-        
-        # 主布局
         main_layout = QHBoxLayout(central_widget)
         
-        # 创建分割器
         splitter = QSplitter(Qt.Horizontal)
         main_layout.addWidget(splitter)
         
-        # 左侧：画布
         self.canvas = Canvas()
         self.canvas.keypoint_selected.connect(self.on_keypoint_selected)
         splitter.addWidget(self.canvas)
         
-        # 右侧：控制面板
         control_panel = self.create_control_panel()
         splitter.addWidget(control_panel)
+        splitter.setSizes([900, 400])
         
-        # 设置分割器比例
-        splitter.setSizes([800, 400])
-        
-        # 创建状态栏
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
         self.update_status()
-        
-        # 创建菜单栏
         self.create_menu_bar()
         
     def create_control_panel(self) -> QWidget:
-        """创建控制面板"""
         panel = QFrame()
-        panel.setMaximumWidth(300)
+        panel.setMaximumWidth(350)
         layout = QVBoxLayout(panel)
         
-        # 文件操作
-        file_group = QFrame()
+        # --- 文件操作区 ---
+        file_group = QGroupBox("文件操作")
         file_layout = QVBoxLayout(file_group)
         
         self.open_btn = QPushButton("打开图片文件夹")
         self.open_btn.clicked.connect(self.open_folder)
         file_layout.addWidget(self.open_btn)
         
+        nav_layout = QHBoxLayout()
         self.prev_btn = QPushButton("上一张 (←)")
         self.prev_btn.clicked.connect(self.prev_image)
-        file_layout.addWidget(self.prev_btn)
-        
         self.next_btn = QPushButton("下一张 (→)")
         self.next_btn.clicked.connect(self.next_image)
-        file_layout.addWidget(self.next_btn)
+        nav_layout.addWidget(self.prev_btn)
+        nav_layout.addWidget(self.next_btn)
+        file_layout.addLayout(nav_layout)
         
         self.save_btn = QPushButton("保存 (Ctrl+S)")
         self.save_btn.clicked.connect(self.save_current)
         file_layout.addWidget(self.save_btn)
         
+        # [新增功能 2] 废弃按钮
+        self.ignore_btn = QPushButton("标记为废弃/移动到Ignore (Del)")
+        self.ignore_btn.setStyleSheet("background-color: #ffcccc; color: darkred;")
+        self.ignore_btn.clicked.connect(self.move_to_ignore)
+        file_layout.addWidget(self.ignore_btn)
+        
         layout.addWidget(file_group)
         
-        # 关键点列表
+        # --- [新增功能 3] 评分区 ---
+        score_group = QGroupBox("姿态美学评分")
+        score_layout = QHBoxLayout(score_group)
+        score_layout.addWidget(QLabel("评分 (-1=未评):"))
+        
+        self.score_spin = QSpinBox()
+        self.score_spin.setRange(-1, 10)
+        self.score_spin.setValue(-1)
+        # 移除特殊文本，直接显示数字
+        self.score_spin.valueChanged.connect(self.on_score_changed)
+        score_layout.addWidget(self.score_spin)
+        
+        layout.addWidget(score_group)
+        
+        # --- 关键点列表 ---
         layout.addWidget(QLabel("关键点列表:"))
         self.keypoint_list = QListWidget()
         self.keypoint_list.itemClicked.connect(self.on_list_item_clicked)
         layout.addWidget(self.keypoint_list)
-        
-        # 更新关键点列表
         self.update_keypoint_list()
         
-        # 视图控制
-        view_group = QFrame()
+        # --- 视图控制 ---
+        view_group = QGroupBox("视图控制")
         view_layout = QVBoxLayout(view_group)
         
-        layout.addWidget(QLabel("视图控制:"))
-        
-        self.fit_btn = QPushButton("适应窗口")
+        self.fit_btn = QPushButton("适应窗口 / 重置视图")
         self.fit_btn.clicked.connect(self.fit_to_window)
         view_layout.addWidget(self.fit_btn)
         
@@ -583,30 +539,21 @@ class PoseEditor(QMainWindow):
         
         layout.addWidget(view_group)
         
-        # 操作提示
-        layout.addWidget(QLabel("操作提示:"))
+        # --- 帮助 ---
         help_text = QLabel(
-            "• 左键拖拽: 移动关键点\n"
-            "• A键: 标记为遮挡\n"
-            "• Del键: 删除关键点\n"
-            "• R键: 重置关键点\n"
-            "• 滚轮: 缩放\n"
-            "• 右键拖拽: 平移\n"
-            "• Tab: 切换关键点"
+            "• 左键: 选中/拖拽 (Ctrl+点击=瞬移)\n"
+            "• 右键: 平移画布 | 滚轮: 缩放\n"
+            "• A: 遮挡 | D: 不可见 | S: 可见\n"
+            "• Tab: 切换点 | Del: 移至Ignore"
         )
-        help_text.setWordWrap(True)
         help_text.setStyleSheet("color: gray; font-size: 11px;")
         layout.addWidget(help_text)
         
         layout.addStretch()
-        
         return panel
         
     def create_menu_bar(self):
-        """创建菜单栏"""
         menubar = self.menuBar()
-        
-        # 文件菜单
         file_menu = menubar.addMenu("文件")
         
         open_action = QAction("打开文件夹", self)
@@ -619,9 +566,7 @@ class PoseEditor(QMainWindow):
         save_action.triggered.connect(self.save_current)
         file_menu.addAction(save_action)
         
-        # 编辑菜单
         edit_menu = menubar.addMenu("编辑")
-        
         undo_action = QAction("撤销", self)
         undo_action.setShortcut("Ctrl+Z")
         undo_action.triggered.connect(self.undo)
@@ -633,33 +578,22 @@ class PoseEditor(QMainWindow):
         edit_menu.addAction(redo_action)
         
     def update_keypoint_list(self):
-        """更新关键点列表"""
         self.keypoint_list.clear()
         for kp in self.canvas.pose_data.keypoints:
             item = QListWidgetItem(kp.name)
-            
-            # 根据可见性设置颜色
-            if kp.visibility == 2:
-                item.setForeground(Qt.green)
-            elif kp.visibility == 1:
-                item.setForeground(Qt.yellow)
-            else:
-                item.setForeground(Qt.gray)
-                
+            if kp.visibility == 2: item.setForeground(Qt.green)
+            elif kp.visibility == 1: item.setForeground(Qt.darkYellow)
+            else: item.setForeground(Qt.gray)
             self.keypoint_list.addItem(item)
             
     def on_keypoint_selected(self, name: str):
-        """关键点被选中时的回调"""
         self.update_status()
-        
-        # 更新列表选中状态
         for i in range(self.keypoint_list.count()):
             if self.keypoint_list.item(i).text() == name:
                 self.keypoint_list.setCurrentRow(i)
                 break
                 
     def on_list_item_clicked(self, item: QListWidgetItem):
-        """列表项被点击时的回调"""
         kp_name = item.text()
         for kp in self.canvas.pose_data.keypoints:
             if kp.name == kp_name:
@@ -667,30 +601,31 @@ class PoseEditor(QMainWindow):
                 self.canvas.update()
                 self.update_status()
                 break
-                
+    
+    def on_score_changed(self, value):
+        """评分改变时更新数据"""
+        self.canvas.pose_data.score = value
+        
     def update_status(self):
-        """更新状态栏"""
         if self.current_image_path:
             filename = Path(self.current_image_path).name
-            status = f"当前图片: {filename} ({self.current_index + 1}/{len(self.image_files)})"
+            status = f"图片: {filename} ({self.current_index + 1}/{len(self.image_files)})"
         else:
             status = "未加载图片"
             
         if self.canvas.selected_keypoint:
             kp = self.canvas.selected_keypoint
-            visibility_name = {0: "不可见", 1: "遮挡", 2: "可见"}[kp.visibility]
-            status += f" | 当前选中: {kp.name} ({visibility_name})"
+            vis_map = {0: "不可见", 1: "遮挡", 2: "可见"}
+            status += f" | 选中: {kp.name} ({vis_map[kp.visibility]})"
             
         self.status_bar.showMessage(status)
         
     def open_folder(self):
-        """打开图片文件夹"""
         folder = QFileDialog.getExistingDirectory(self, "选择图片文件夹")
         if folder:
             self.load_images_from_folder(folder)
             
     def load_images_from_folder(self, folder: str):
-        """从文件夹加载图片"""
         folder_path = Path(folder)
         image_extensions = {'.jpg', '.jpeg', '.png', '.bmp', '.tiff'}
         
@@ -700,158 +635,182 @@ class PoseEditor(QMainWindow):
             self.image_files.extend(folder_path.glob(f"*{ext.upper()}"))
             
         self.image_files.sort()
-        
         if self.image_files:
             self.current_index = 0
             self.load_current_image()
+        else:
+            QMessageBox.information(self, "提示", "该文件夹下没有图片")
             
-    def load_images(self):
-        """加载图片（示例）"""
-        # 这里可以加载默认的示例图片
-        pass
-        
     def load_current_image(self):
-        """加载当前图片"""
-        if not self.image_files:
-            return
-            
+        if not self.image_files: return
         self.current_image_path = str(self.image_files[self.current_index])
         
-        # 加载图片
         image = QImage(self.current_image_path)
         if image.isNull():
             QMessageBox.warning(self, "错误", f"无法加载图片: {self.current_image_path}")
             return
             
         self.canvas.set_image(image)
-        
-        # 加载对应的标注文件
         self.load_annotation()
         
-        # 更新UI
+        # 加载完数据后，重置撤销栈
+        self.canvas.undo_stack.clear()
         self.update_status()
         self.update_keypoint_list()
         
     def load_annotation(self):
-        """加载标注文件"""
-        if not self.current_image_path:
-            return
-            
-        # 查找对应的JSON文件
+        if not self.current_image_path: return
+        
         image_path = Path(self.current_image_path)
         json_path = image_path.with_suffix('.json')
+        
+        pose_data = PoseData()
         
         if json_path.exists():
             try:
                 with open(json_path, 'r', encoding='utf-8') as f:
                     data = json.load(f)
                     pose_data = PoseData.from_dict(data)
-                    self.canvas.set_pose_data(pose_data)
             except Exception as e:
-                QMessageBox.warning(self, "错误", f"无法加载标注文件: {e}")
-                self.canvas.set_pose_data(PoseData())  # 使用空的姿态数据
-        else:
-            # 如果没有标注文件，创建空的姿态数据
-            self.canvas.set_pose_data(PoseData())
-            
+                print(f"Error loading JSON: {e}")
+        
+        self.canvas.set_pose_data(pose_data)
         self.current_annotation_path = str(json_path)
+        
+        # 更新 UI 显示评分
+        self.score_spin.blockSignals(True) # 防止触发 onChanged 导致数据被误改
+        self.score_spin.setValue(pose_data.score)
+        self.score_spin.blockSignals(False)
+        
         if self.canvas.pose_data.keypoints:
+            # 默认选中第一个点
             first_kp = self.canvas.pose_data.keypoints[0]
             self.canvas.selected_keypoint = first_kp
-            self.on_keypoint_selected(first_kp.name) # 刷新列表高亮
-            self.canvas.update()
+            self.on_keypoint_selected(first_kp.name)
+
+        # [新增功能 1] 自动缩放逻辑
+        if pose_data.has_valid_keypoints():
+            # 如果有有效数据，聚焦于人体
+            self.canvas.focus_on_pose()
+        else:
+            # 如果是新数据或全0数据，全屏显示
+            self.canvas.fit_to_window()
         
     def save_current(self):
-        """保存当前标注"""
-        if not self.current_annotation_path:
-            return
-            
+        if not self.current_annotation_path: return
         try:
             data = self.canvas.pose_data.to_dict()
             with open(self.current_annotation_path, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
-                
             self.status_bar.showMessage(f"已保存: {Path(self.current_annotation_path).name}", 2000)
         except Exception as e:
             QMessageBox.warning(self, "错误", f"保存失败: {e}")
+
+    def move_to_ignore(self):
+        """[新增功能 2] 将当前图片和JSON移动到 ignore 文件夹"""
+        if not self.current_image_path:
+            return
             
+        # 确认对话框（可选，为了效率可以注释掉）
+        # reply = QMessageBox.question(self, '确认', '确定要将此图片标记为废弃吗？', 
+        #                              QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        # if reply == QMessageBox.No:
+        #     return
+
+        image_path = Path(self.current_image_path)
+        json_path = image_path.with_suffix('.json')
+        
+        ignore_dir = image_path.parent / "ignore"
+        if not ignore_dir.exists():
+            ignore_dir.mkdir()
+            
+        try:
+            # 移动图片
+            shutil.move(str(image_path), str(ignore_dir / image_path.name))
+            
+            # 如果有 JSON 也移动
+            if json_path.exists():
+                shutil.move(str(json_path), str(ignore_dir / json_path.name))
+                
+            print(f"Moved {image_path.name} to ignore/")
+            
+            # 从列表中移除
+            del self.image_files[self.current_index]
+            
+            # 如果列表空了
+            if not self.image_files:
+                self.canvas.image = None
+                self.canvas.update()
+                QMessageBox.information(self, "提示", "所有图片处理完毕")
+                return
+
+            # 修正索引（保持当前索引，因为后面元素前移了）
+            if self.current_index >= len(self.image_files):
+                self.current_index = len(self.image_files) - 1
+                
+            # 加载下一张
+            self.load_current_image()
+            
+        except Exception as e:
+            QMessageBox.critical(self, "错误", f"移动文件失败: {e}")
+
     def prev_image(self):
-        """上一张图片"""
         if self.image_files and self.current_index > 0:
-            self.save_current()  # 自动保存当前
+            self.save_current()
             self.current_index -= 1
             self.load_current_image()
             
     def next_image(self):
-        """下一张图片"""
         if self.image_files and self.current_index < len(self.image_files) - 1:
-            self.save_current()  # 自动保存当前
+            self.save_current()
             self.current_index += 1
             self.load_current_image()
             
     def fit_to_window(self):
-        """适应窗口大小"""
         self.canvas.fit_to_window()
-        self.canvas.update()
         
     def toggle_skeleton(self):
-        """切换骨架显示"""
         self.canvas.show_skeleton = not self.canvas.show_skeleton
         self.skeleton_btn.setText("显示骨架" if not self.canvas.show_skeleton else "隐藏骨架 (H)")
         self.canvas.update()
         
     def undo(self):
-        """撤销操作"""
         if self.canvas.undo_stack.undo():
             self.canvas.update()
             self.update_keypoint_list()
-            self.update_status()
             
     def redo(self):
-        """重做操作"""
         if self.canvas.undo_stack.redo():
             self.canvas.update()
             self.update_keypoint_list()
-            self.update_status()
         
     def keyPressEvent(self, event: QKeyEvent):
-        """键盘事件"""
         key = event.key()
         
-        # 方向键切换图片
         if key == Qt.Key_Left:
             self.prev_image()
         elif key == Qt.Key_Right:
             self.next_image()
-        # Tab键切换关键点
         elif key == Qt.Key_Tab:
             self.switch_keypoint(1)
         elif key == Qt.Key_Backtab:
             self.switch_keypoint(-1)
-        # Ctrl+S 保存
         elif key == Qt.Key_S and event.modifiers() & Qt.ControlModifier:
             self.save_current()
+        elif key == Qt.Key_Delete: # Delete 键触发移动到 ignore
+            self.move_to_ignore()
         else:
-            # 其他按键传递给画布处理
             self.canvas.keyPressEvent(event)
             
     def switch_keypoint(self, direction: int):
-        """切换关键点选择"""
-        if not self.canvas.pose_data.keypoints:
-            return
-            
-        # 找到当前选中的关键点索引
+        if not self.canvas.pose_data.keypoints: return
         current_idx = -1
         if self.canvas.selected_keypoint:
-            for i, kp in enumerate(self.canvas.pose_data.keypoints):
-                if kp == self.canvas.selected_keypoint:
-                    current_idx = i
-                    break
-                    
-        # 计算新的索引
+            try:
+                current_idx = self.canvas.pose_data.keypoints.index(self.canvas.selected_keypoint)
+            except ValueError:
+                pass
         new_idx = (current_idx + direction) % len(self.canvas.pose_data.keypoints)
-        
-        # 选择新的关键点
         self.canvas.selected_keypoint = self.canvas.pose_data.keypoints[new_idx]
         self.canvas.update()
         self.on_keypoint_selected(self.canvas.selected_keypoint.name)
