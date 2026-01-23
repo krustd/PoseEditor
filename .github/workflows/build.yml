@@ -1,6 +1,5 @@
 name: Build and Release
 
-# 触发条件：当你创建新的 Tag (比如 v1.0.0) 推送到 GitHub 时触发
 on:
   push:
     tags:
@@ -11,6 +10,7 @@ jobs:
     name: Build packages
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false # <--- 关键修改1：防止一个失败导致全军覆没
       matrix:
         include:
           - os: windows-latest
@@ -18,7 +18,7 @@ jobs:
             ext: .exe
           - os: macos-latest
             target: macos
-            ext: .app # PyInstaller生成目录，后续我们会打成zip
+            ext: .app
           - os: ubuntu-latest
             target: linux
             ext: ""
@@ -31,42 +31,48 @@ jobs:
         uses: actions/setup-python@v4
         with:
           python-version: "3.9"
+          cache: "pip" # 开启缓存，加速后续构建
 
-      # --- Linux 特有依赖安装 ---
-      - name: Install Linux dependencies (PortAudio & FFmpeg)
+      # --- Linux 特有依赖 ---
+      - name: Install Linux dependencies
         if: matrix.os == 'ubuntu-latest'
         run: |
-          sudo apt-get update
+          sudo apt-get update --fix-missing
           sudo apt-get install -y portaudio19-dev python3-pyaudio ffmpeg
 
-      # --- macOS 特有依赖安装 ---
+      # --- macOS 特有依赖 ---
       - name: Install macOS dependencies
         if: matrix.os == 'macos-latest'
         run: |
           brew install portaudio ffmpeg
 
-      # --- Windows 特有依赖 (FFmpeg通常由用户手动安装，这里仅环境准备) ---
-
+      # --- 核心修改：分步安装依赖，优先安装轻量版 PyTorch ---
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+
+          # 关键修改2：优先安装 CPU 版本的 PyTorch (防止下载 2GB 的 CUDA 版导致超时)
+          pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu --default-timeout=100
+
+          # 安装其他依赖 (requirements.txt 里如果有 torch 会自动跳过，因为上面已安装)
+          pip install -r requirements.txt --default-timeout=100
+
+          # 安装打包工具
           pip install pyinstaller
 
       - name: Build with PyInstaller
-        # 使用 --collect-all 确保 whisper 和 tiktoken 的数据文件被包含
-        # --windowed 表示不显示黑框控制台
+        # Windows/Linux 需包含相关库，Mac 稍微不同但通用配置通常可行
         run: |
           pyinstaller main.py --name=PoseEditor-${{ matrix.target }} --onefile --windowed --clean --collect-all whisper --collect-all tiktoken --collect-all pyside6
 
-      # --- 打包处理 (Windows) ---
+      # --- 打包 Windows ---
       - name: Zip Windows Build
         if: matrix.os == 'windows-latest'
         run: |
           cd dist
           Compress-Archive -Path PoseEditor-windows.exe -DestinationPath PoseEditor-windows.zip
 
-      # --- 打包处理 (Linux) ---
+      # --- 打包 Linux ---
       - name: Zip Linux Build
         if: matrix.os == 'ubuntu-latest'
         run: |
@@ -74,15 +80,14 @@ jobs:
           chmod +x PoseEditor-linux
           tar -czvf PoseEditor-linux.tar.gz PoseEditor-linux
 
-      # --- 打包处理 (macOS) ---
-      # macOS 生成的是一个 Unix 可执行文件（因为用了 --onefile），我们依然打个包
+      # --- 打包 macOS ---
       - name: Zip macOS Build
         if: matrix.os == 'macos-latest'
         run: |
           cd dist
-          zip -r PoseEditor-macos.zip PoseEditor-macos
+          zip -r PoseEditor-macos.zip PoseEditor-macos.app
 
-      # --- 上传构建产物到 Release 页面 ---
+      # --- 上传结果 ---
       - name: Upload Release Assets
         uses: softprops/action-gh-release@v1
         if: startsWith(github.ref, 'refs/tags/')
