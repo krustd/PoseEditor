@@ -1,0 +1,92 @@
+name: Build and Release
+
+# 触发条件：当你创建新的 Tag (比如 v1.0.0) 推送到 GitHub 时触发
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    name: Build packages
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            target: windows
+            ext: .exe
+          - os: macos-latest
+            target: macos
+            ext: .app # PyInstaller生成目录，后续我们会打成zip
+          - os: ubuntu-latest
+            target: linux
+            ext: ""
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.9"
+
+      # --- Linux 特有依赖安装 ---
+      - name: Install Linux dependencies (PortAudio & FFmpeg)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y portaudio19-dev python3-pyaudio ffmpeg
+
+      # --- macOS 特有依赖安装 ---
+      - name: Install macOS dependencies
+        if: matrix.os == 'macos-latest'
+        run: |
+          brew install portaudio ffmpeg
+
+      # --- Windows 特有依赖 (FFmpeg通常由用户手动安装，这里仅环境准备) ---
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build with PyInstaller
+        # 使用 --collect-all 确保 whisper 和 tiktoken 的数据文件被包含
+        # --windowed 表示不显示黑框控制台
+        run: |
+          pyinstaller main.py --name=PoseEditor-${{ matrix.target }} --onefile --windowed --clean --collect-all whisper --collect-all tiktoken --collect-all pyside6
+
+      # --- 打包处理 (Windows) ---
+      - name: Zip Windows Build
+        if: matrix.os == 'windows-latest'
+        run: |
+          cd dist
+          Compress-Archive -Path PoseEditor-windows.exe -DestinationPath PoseEditor-windows.zip
+
+      # --- 打包处理 (Linux) ---
+      - name: Zip Linux Build
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          cd dist
+          chmod +x PoseEditor-linux
+          tar -czvf PoseEditor-linux.tar.gz PoseEditor-linux
+
+      # --- 打包处理 (macOS) ---
+      # macOS 生成的是一个 Unix 可执行文件（因为用了 --onefile），我们依然打个包
+      - name: Zip macOS Build
+        if: matrix.os == 'macos-latest'
+        run: |
+          cd dist
+          zip -r PoseEditor-macos.zip PoseEditor-macos
+
+      # --- 上传构建产物到 Release 页面 ---
+      - name: Upload Release Assets
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: |
+            dist/*.zip
+            dist/*.tar.gz

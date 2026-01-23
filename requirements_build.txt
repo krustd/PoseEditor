@@ -1,0 +1,7 @@
+numpy>=2.0.2
+openai-whisper>=20250625
+pyaudio>=0.2.14
+pyside6>=6.10.1
+torch
+tiktoken
+more-itertools

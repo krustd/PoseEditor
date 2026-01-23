@@ -12,11 +12,24 @@
 - **撤销/重做**：完整的操作历史管理
 - **智能缩放**：自动聚焦姿态区域或适应窗口
 
+"布局界面，左侧显示图片和关键点，右侧为控制面板*
+
+## 快速开始 (下载 .exe)
+
+1. 前往 [Releases 页面](https://github.com/krustd/PoseEditor/releases) 下载最新版本的 `poseeditor-windows.exe`。
+2. **重要：** 确保你的电脑已安装 FFmpeg 并配置了环境变量（参考下方 FFmpeg 安装指南）。
+3. 双击运行即可，无需安装 Python 环境。
+
+## 源码开发 (Development)
+
 ## 安装与运行
 
 1. **确保已安装Python 3.9或更高版本**
 2. **必须安装FFmpeg**（语音识别功能的必要依赖）：
-   - Windows: 下载FFmpeg并添加到系统PATH环境变量
+   - **Windows:**
+     * **方法 1 (推荐):** 下载 [Release 构建包 (gyan.dev)](https://www.gyan.dev/ffmpeg/builds/)，解压后将 `bin` 文件夹的路径添加到系统环境变量 Path 中。
+     * **方法 2 (如果你装了 Scoop):** 在 PowerShell 运行 `scoop install ffmpeg`
+     * **方法 3 (如果你装了 Choco):** 在 PowerShell 运行 `choco install ffmpeg`
    - macOS: `brew install ffmpeg`
    - Linux (Ubuntu/Debian): `sudo apt-get install ffmpeg`
    - 验证安装: 在命令行运行 `ffmpeg -version`
