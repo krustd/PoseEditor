@@ -408,25 +408,54 @@ class Canvas(QWidget):
         painter.translate(self.offset)
         painter.scale(self.scale, self.scale)
         
+        # 统一颜色
+        normal_color = QColor(0, 200, 255, int(255 * self.keypoint_opacity))
+        normal_border = QColor(0, 0, 0)
+        selected_color = QColor(255, 255, 0)
+        selected_border = QColor(0, 0, 0)
+        
         for i, kp in enumerate(self.pose_data.keypoints):
+            is_selected = (self.selected_keypoint == kp)
+            fill_color = selected_color if is_selected else normal_color
+            border_color = selected_border if is_selected else normal_border
+            
+            radius = 5 / self.scale
+            pen_width = 1.5 / self.scale
+            
             if kp.visibility == 2:
-                color = QColor(0, 255, 0, int(255 * self.keypoint_opacity))
-                border_color = Qt.black
+                # 可见 = 圆形（实心）
+                painter.setBrush(QBrush(fill_color))
+                painter.setPen(QPen(border_color, pen_width))
+                painter.drawEllipse(QPointF(kp.x, kp.y), radius, radius)
+                
             elif kp.visibility == 1:
-                color = QColor(255, 165, 0, int(255 * self.keypoint_opacity))
-                border_color = Qt.black
+                # 遮挡 = 三角形（实心）
+                from PySide6.QtGui import QPolygonF
+                tri_size = radius * 1.3
+                triangle = QPolygonF([
+                    QPointF(kp.x, kp.y - tri_size),
+                    QPointF(kp.x - tri_size, kp.y + tri_size * 0.8),
+                    QPointF(kp.x + tri_size, kp.y + tri_size * 0.8)
+                ])
+                painter.setBrush(QBrush(fill_color))
+                painter.setPen(QPen(border_color, pen_width))
+                painter.drawPolygon(triangle)
+                
             else:
-                color = QColor(255, 0, 0, 150) 
-                border_color = Qt.white
-                
-            if self.selected_keypoint == kp:
-                color = QColor(255, 255, 0)
-                border_color = Qt.black
-                
-            painter.setBrush(QBrush(color))
-            painter.setPen(QPen(border_color, 1))
-            radius = 5 / self.scale 
-            painter.drawEllipse(QPointF(kp.x, kp.y), radius, radius)
+                # 不可见 = 叉号
+                cross_size = radius * 0.9
+                cross_pen = QPen(fill_color, pen_width * 2)
+                cross_pen.setCapStyle(Qt.RoundCap)
+                painter.setPen(cross_pen)
+                painter.setBrush(Qt.NoBrush)
+                painter.drawLine(
+                    QPointF(kp.x - cross_size, kp.y - cross_size),
+                    QPointF(kp.x + cross_size, kp.y + cross_size)
+                )
+                painter.drawLine(
+                    QPointF(kp.x - cross_size, kp.y + cross_size),
+                    QPointF(kp.x + cross_size, kp.y - cross_size)
+                )
             
         painter.restore()
         
@@ -785,7 +814,7 @@ class PoseEditor(QMainWindow):
         help_text = QLabel(
             "• 左键: 选中/拖拽 (Ctrl+点击=瞬移)\n"
             "• 右键: 平移画布 | 滚轮: 缩放\n"
-            "• A: 遮挡 | D: 不可见 | S: 可见\n"
+            "• A: 遮挡(▲) | D: 不可见(✕) | S: 可见(●)\n"
             "• Tab/Shift+Tab: 切换点 | Delete: 移至Ignore\n"
             "• ←/→: 上一张/下一张 | Ctrl+→: 下个需处理\n"
             "• Ctrl+Z/Y: 撤销/重做 | Ctrl+S: 保存\n"
@@ -825,21 +854,27 @@ class PoseEditor(QMainWindow):
     def update_keypoint_list(self):
         self.keypoint_list.clear()
         for kp in self.canvas.pose_data.keypoints:
-            item = QListWidgetItem(kp.name)
-            if kp.visibility == 2: item.setForeground(Qt.green)
-            elif kp.visibility == 1: item.setForeground(Qt.darkYellow)
-            else: item.setForeground(Qt.gray)
+            # 用形状符号表示可见性：● 圆形=可见，▲ 三角=遮挡，✕ 叉=不可见
+            if kp.visibility == 2:
+                prefix = "● "  # 可见
+            elif kp.visibility == 1:
+                prefix = "▲ "  # 遮挡
+            else:
+                prefix = "✕ "  # 不可见
+            item = QListWidgetItem(prefix + kp.name)
             self.keypoint_list.addItem(item)
             
     def on_keypoint_selected(self, name: str):
         self.update_status()
         for i in range(self.keypoint_list.count()):
-            if self.keypoint_list.item(i).text() == name:
+            item_text = self.keypoint_list.item(i).text()
+            # 列表项有形状前缀（如 "● nose"），需要去掉前缀比较
+            if item_text[2:] == name:
                 self.keypoint_list.setCurrentRow(i)
                 break
                 
     def on_list_item_clicked(self, item: QListWidgetItem):
-        kp_name = item.text()
+        kp_name = item.text()[2:]  # 去掉形状前缀（如 "● "）
         for kp in self.canvas.pose_data.keypoints:
             if kp.name == kp_name:
                 self.canvas.selected_keypoint = kp
