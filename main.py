@@ -65,7 +65,7 @@ class Keypoint:
         self.name = name
         self.x = x
         self.y = y
-        self.visibility = visibility  # 0: 不可见/未标记, 1: 遮挡, 2: 可见
+        self.visibility = visibility  # 0: 遮挡, 1: 可见
         
     def copy(self) -> 'Keypoint':
         return Keypoint(self.name, self.x, self.y, self.visibility)
@@ -168,7 +168,7 @@ class PoseData:
                 if i < len(visibility_list):
                     kp.visibility = visibility_list[i]
                 elif i < len(pose.raw_scores) and pose.raw_scores[i] > 0.3:
-                    kp.visibility = 2  # 置信度高则默认可见
+                    kp.visibility = 1  # 置信度高则默认可见
                     
         elif raw_kps and isinstance(raw_kps[0], dict):
             # ---- 旧的自定义格式（向后兼容） ----
@@ -416,7 +416,7 @@ class Canvas(QWidget):
         for start_idx, end_idx in self.skeleton:
             start_kp = self.pose_data.keypoints[start_idx]
             end_kp = self.pose_data.keypoints[end_idx]
-            if start_kp.visibility > 0 and end_kp.visibility > 0:
+            if (start_kp.x > 1 or start_kp.y > 1) and (end_kp.x > 1 or end_kp.y > 1):
                 color = self.SKELETON_COLORS.get((start_idx, end_idx), QColor(100, 200, 100, 150))
                 painter.setPen(QPen(color, 2))
                 painter.drawLine(QPointF(start_kp.x, start_kp.y), 
@@ -463,24 +463,12 @@ class Canvas(QWidget):
             radius = 5 / self.scale
             pen_width = 1.5 / self.scale
             
-            if kp.visibility == 2:
+            if kp.visibility == 1:
                 painter.setBrush(QBrush(fill_color))
                 painter.setPen(QPen(border_color, pen_width))
                 painter.drawEllipse(QPointF(kp.x, kp.y), radius, radius)
                 
-            elif kp.visibility == 1:
-                from PySide6.QtGui import QPolygonF
-                tri_size = radius * 1.3
-                triangle = QPolygonF([
-                    QPointF(kp.x, kp.y - tri_size),
-                    QPointF(kp.x - tri_size, kp.y + tri_size * 0.8),
-                    QPointF(kp.x + tri_size, kp.y + tri_size * 0.8)
-                ])
-                painter.setBrush(QBrush(fill_color))
-                painter.setPen(QPen(border_color, pen_width))
-                painter.drawPolygon(triangle)
-                
-            else:
+            elif kp.visibility == 0:
                 cross_size = radius * 0.9
                 cross_pen = QPen(fill_color, pen_width * 2)
                 cross_pen.setCapStyle(Qt.RoundCap)
@@ -507,7 +495,7 @@ class Canvas(QWidget):
                     
                     self.selected_keypoint.x = max(0, image_pos.x())
                     self.selected_keypoint.y = max(0, image_pos.y())
-                    self.selected_keypoint.visibility = 2
+                    self.selected_keypoint.visibility = 1
                     
                     new_state = self.selected_keypoint.copy()
                     command = KeypointChangeCommand(self.pose_data, keypoint_index, old_state, new_state)
@@ -531,8 +519,6 @@ class Canvas(QWidget):
             image_pos = self.widget_to_image(event.pos())
             self.selected_keypoint.x = max(0, image_pos.x())
             self.selected_keypoint.y = max(0, image_pos.y())
-            if self.selected_keypoint.visibility == 0:
-                self.selected_keypoint.visibility = 2
             self.update()
         elif self.panning:
             delta = event.pos() - self.last_pos
@@ -583,10 +569,9 @@ class Canvas(QWidget):
         keypoint_index = self.pose_data.keypoints.index(self.selected_keypoint)
         old_state = self.selected_keypoint.copy()
         
-        if key in [Qt.Key_A, Qt.Key_D, Qt.Key_S]:
-            if key == Qt.Key_A: self.selected_keypoint.visibility = 1
-            elif key == Qt.Key_D: self.selected_keypoint.visibility = 0
-            elif key == Qt.Key_S: self.selected_keypoint.visibility = 2
+        if key in [Qt.Key_A, Qt.Key_S]:
+            if key == Qt.Key_A: self.selected_keypoint.visibility = 0
+            elif key == Qt.Key_S: self.selected_keypoint.visibility = 1
             
             new_state = self.selected_keypoint.copy()
             command = KeypointChangeCommand(self.pose_data, keypoint_index, old_state, new_state)
@@ -646,12 +631,11 @@ class PoseEditor(QMainWindow):
         layout.setSpacing(4)
         layout.setContentsMargins(4, 4, 4, 4)
         
-        # --- 文件操作区 ---
-        file_group = QGroupBox("项目")
-        file_layout = QVBoxLayout(file_group)
-        file_layout.setSpacing(4)
+        # --- 项目操作（紧凑两行） ---
+        proj_row1 = QHBoxLayout()
+        proj_row1.setSpacing(3)
         
-        self.open_btn = QPushButton("打开项目文件夹")
+        self.open_btn = QPushButton("📁 打开项目")
         self.open_btn.setToolTip(
             "选择项目根目录，工具会自动识别或创建子目录：\n"
             f"  {DIR_ORIGIN}/  — 原图\n"
@@ -660,33 +644,75 @@ class PoseEditor(QMainWindow):
             f"  {META_FILE}  — 协作元数据"
         )
         self.open_btn.clicked.connect(self.open_folder)
-        file_layout.addWidget(self.open_btn)
+        proj_row1.addWidget(self.open_btn)
         
-        # 项目路径显示
+        self.save_btn = QPushButton("💾 保存")
+        self.save_btn.setToolTip("Ctrl+S")
+        self.save_btn.clicked.connect(self.save_current)
+        proj_row1.addWidget(self.save_btn)
+        
+        layout.addLayout(proj_row1)
+        
         self.project_path_label = QLabel("未打开项目")
         self.project_path_label.setStyleSheet("color: #888; font-size: 10px;")
         self.project_path_label.setWordWrap(True)
-        file_layout.addWidget(self.project_path_label)
+        layout.addWidget(self.project_path_label)
         
-        nav_layout = QHBoxLayout()
+        # 导航 + 视图控制 合并一行
+        nav_row = QHBoxLayout()
+        nav_row.setSpacing(3)
+        
         self.prev_btn = QPushButton("← 上一张")
         self.prev_btn.clicked.connect(self.prev_image)
+        nav_row.addWidget(self.prev_btn)
+        
         self.next_btn = QPushButton("下一张 →")
         self.next_btn.clicked.connect(self.next_image)
-        nav_layout.addWidget(self.prev_btn)
-        nav_layout.addWidget(self.next_btn)
-        file_layout.addLayout(nav_layout)
+        nav_row.addWidget(self.next_btn)
         
-        self.save_btn = QPushButton("保存 (Ctrl+S)")
-        self.save_btn.clicked.connect(self.save_current)
-        file_layout.addWidget(self.save_btn)
+        self.next_process_btn = QPushButton("待处理 (O)")
+        self.next_process_btn.setToolTip("跳到下一个未完成评分的图片")
+        self.next_process_btn.clicked.connect(self.next_processable_image)
+        nav_row.addWidget(self.next_process_btn)
         
-        layout.addWidget(file_group)
+        layout.addLayout(nav_row)
+        
+        # 视图控制单独一行（带文字，更清晰）
+        view_row = QHBoxLayout()
+        view_row.setSpacing(3)
+        self.focus_pose_btn = QPushButton("聚焦 (W)")
+        self.focus_pose_btn.setToolTip("根据关键点位置缩放视图")
+        self.focus_pose_btn.clicked.connect(self.focus_on_pose)
+        self.fit_btn = QPushButton("全图 (E)")
+        self.fit_btn.setToolTip("缩放以显示完整图片")
+        self.fit_btn.clicked.connect(self.fit_to_window)
+        self.skeleton_btn = QPushButton("骨架 (H)")
+        self.skeleton_btn.setToolTip("隐藏/显示骨架")
+        self.skeleton_btn.clicked.connect(self.toggle_skeleton)
+        view_row.addWidget(self.focus_pose_btn)
+        view_row.addWidget(self.fit_btn)
+        view_row.addWidget(self.skeleton_btn)
+        layout.addLayout(view_row)
+        
+        # --- 关键点列表（全宽，限高） ---
+        layout.addWidget(QLabel("关键点列表:"))
+        self.keypoint_list = QListWidget()
+        self.keypoint_list.setMaximumHeight(160)
+        self.keypoint_list.setStyleSheet("font-size: 11px;")
+        self.keypoint_list.itemClicked.connect(self.on_list_item_clicked)
+        layout.addWidget(self.keypoint_list)
+        self.update_keypoint_list()
         
         # --- 移至Ignore ---
         skip_group = QGroupBox("移至Ignore（不可撤销）")
-        skip_layout = QHBoxLayout(skip_group)
-        skip_layout.setSpacing(4)
+        skip_layout_top = QHBoxLayout()
+        skip_layout_top.setSpacing(4)
+        skip_layout_bottom = QHBoxLayout()
+        skip_layout_bottom.setSpacing(4)
+        skip_group_layout = QVBoxLayout(skip_group)
+        skip_group_layout.setSpacing(4)
+        skip_group_layout.addLayout(skip_layout_top)
+        skip_group_layout.addLayout(skip_layout_bottom)
         
         ignore_btn_style = """
             QPushButton { 
@@ -696,138 +722,113 @@ class PoseEditor(QMainWindow):
             QPushButton:hover { background-color: #ffc107; color: white; }
         """
         
-        self.ignore_aesthetic_btn = QPushButton("美感不足")
-        self.ignore_aesthetic_btn.setToolTip("美感不足。如果图像不是具有美感的人物照片（例如日常照片），则可点击该按钮跳过。")
+        self.ignore_aesthetic_btn = QPushButton("1.美感不足")
+        self.ignore_aesthetic_btn.setToolTip("Ctrl+1 | 美感不足。如果图像不是具有美感的人物照片（例如日常照片），则可点击该按钮跳过。")
         self.ignore_aesthetic_btn.clicked.connect(lambda: self.move_to_ignore_category("美感不足"))
         self.ignore_aesthetic_btn.setStyleSheet(ignore_btn_style)
-        skip_layout.addWidget(self.ignore_aesthetic_btn)
+        skip_layout_top.addWidget(self.ignore_aesthetic_btn)
         
-        self.ignore_blur_btn = QPushButton("图像模糊")
-        self.ignore_blur_btn.setToolTip("图像模糊。如果图像分辨率很低，或图像质量不佳，则可点它跳过。")
-        self.ignore_blur_btn.clicked.connect(lambda: self.move_to_ignore_category("图像模糊"))
-        self.ignore_blur_btn.setStyleSheet(ignore_btn_style)
-        skip_layout.addWidget(self.ignore_blur_btn)
+        self.ignore_incomplete_btn = QPushButton("2.难以补全")
+        self.ignore_incomplete_btn.setToolTip("Ctrl+2 | 难以补全。如果图像中的人物下半身都在画面外，难以拖拽画面外的遮挡点到猜测位置，则点它跳过。")
+        self.ignore_incomplete_btn.clicked.connect(lambda: self.move_to_ignore_category("难以补全"))
+        self.ignore_incomplete_btn.setStyleSheet(ignore_btn_style)
+        skip_layout_top.addWidget(self.ignore_incomplete_btn)
         
-        self.ignore_size_btn = QPushButton("比例失调")
-        self.ignore_size_btn.setToolTip("比例失调。如果人物占画面的比例非常小或大，无法确定姿态，则点它跳过。")
+        self.ignore_scene_btn = QPushButton("3.背景失真")
+        self.ignore_scene_btn.setToolTip("Ctrl+3 | 背景失真。这里的图像是将人物图像中的人物区域给删除修复得到的无人场景图。如果该图像有异常纹理等不真实的情况，则点它跳过。")
+        self.ignore_scene_btn.clicked.connect(lambda: self.move_to_ignore_category("背景失真"))
+        self.ignore_scene_btn.setStyleSheet(ignore_btn_style)
+        skip_layout_top.addWidget(self.ignore_scene_btn)
+        
+        self.ignore_size_btn = QPushButton("4.比例失调")
+        self.ignore_size_btn.setToolTip("Ctrl+4 | 比例失调。如果人物占画面的比例非常小或大，无法确定姿态，则点它跳过。")
         self.ignore_size_btn.clicked.connect(lambda: self.move_to_ignore_category("比例失调"))
         self.ignore_size_btn.setStyleSheet(ignore_btn_style)
-        skip_layout.addWidget(self.ignore_size_btn)
+        skip_layout_bottom.addWidget(self.ignore_size_btn)
         
-        self.ignore_scene_btn = QPushButton("背景失真")
-        self.ignore_scene_btn.setToolTip("背景图失真。这里的图像是将人物图像中的人物区域给删除修复得到的无人场景图。如果该图像有异常纹理等不真实的情况，则点它跳过。")
-        self.ignore_scene_btn.clicked.connect(lambda: self.move_to_ignore_category("场景图失真"))
-        self.ignore_scene_btn.setStyleSheet(ignore_btn_style)
-        skip_layout.addWidget(self.ignore_scene_btn)
+        self.ignore_blur_btn = QPushButton("5.图像模糊")
+        self.ignore_blur_btn.setToolTip("Ctrl+5 | 图像模糊。如果图像分辨率很低，或图像质量不佳，则可点它跳过。")
+        self.ignore_blur_btn.clicked.connect(lambda: self.move_to_ignore_category("图像模糊"))
+        self.ignore_blur_btn.setStyleSheet(ignore_btn_style)
+        skip_layout_bottom.addWidget(self.ignore_blur_btn)
         
         layout.addWidget(skip_group)
         
         # 安装延迟tooltip过滤器
         self.tooltip_filter = DelayedTooltipFilter(self)
-        for btn in [self.ignore_aesthetic_btn, self.ignore_blur_btn, 
-                     self.ignore_size_btn, self.ignore_scene_btn]:
+        for btn in [self.ignore_aesthetic_btn, self.ignore_incomplete_btn,
+                     self.ignore_scene_btn, self.ignore_size_btn, self.ignore_blur_btn]:
             btn.installEventFilter(self.tooltip_filter)
         
-        # --- 评分系统 ---
+        # --- 评分系统（无N/A，按钮更大） ---
         score_group = QGroupBox("姿态评分")
         score_layout = QVBoxLayout(score_group)
-        score_layout.setSpacing(2)
+        score_layout.setSpacing(4)
+        
+        score_btn_size = 36  # 放大的按钮尺寸
         
         detail_layout = QGridLayout()
-        detail_layout.setSpacing(2)
+        detail_layout.setSpacing(3)
         
         # 姿势新奇度
         detail_layout.addWidget(QLabel("新奇度:"), 0, 0)
         self.novelty_buttons = {}
         self.novelty_btn_group = QButtonGroup(self)
-        self.novelty_btn_group.setExclusive(True)
-        self.novelty_btn_group.idClicked.connect(lambda id: self.on_new_score_button_clicked("novelty", id))
+        self.novelty_btn_group.setExclusive(False)
+        self.novelty_btn_group.buttonClicked.connect(
+            lambda btn: self._on_exclusive_score_click(self.novelty_btn_group, self.novelty_buttons, "novelty", btn))
         
         for i in range(6):
             btn = QPushButton(str(i))
             btn.setCheckable(True)
-            btn.setFixedSize(25, 25)
+            btn.setFixedSize(score_btn_size, score_btn_size)
             btn.setStyleSheet("""
-                QPushButton { background-color: #f0f0f0; border: 1px solid #ccc; font-size: 10px; }
-                QPushButton:checked { background-color: #28a745; color: white; border: 1px solid #1e7e34; }
+                QPushButton { background-color: #f0f0f0; border: 1px solid #ccc; font-size: 13px; font-weight: bold; }
+                QPushButton:checked { background-color: #28a745; color: white; border: 2px solid #1e7e34; }
             """)
             self.novelty_btn_group.addButton(btn, i)
             detail_layout.addWidget(btn, 0, i+1)
             self.novelty_buttons[i] = btn
         
-        na_btn2 = QPushButton("N/A")
-        na_btn2.setCheckable(True)
-        na_btn2.setFixedSize(25, 25)
-        na_btn2.setStyleSheet("""
-            QPushButton { background-color: #f0f0f0; border: 1px solid #ccc; color: gray; font-size: 10px; }
-            QPushButton:checked { background-color: #999; color: white; }
-        """)
-        self.novelty_btn_group.addButton(na_btn2, -1)
-        detail_layout.addWidget(na_btn2, 0, 7)
-        na_btn2.setChecked(True)
-        self.novelty_buttons[-1] = na_btn2
-        
         # 环境互动性
         detail_layout.addWidget(QLabel("互动性:"), 1, 0)
         self.env_buttons = {}
         self.env_btn_group = QButtonGroup(self)
-        self.env_btn_group.setExclusive(True)
-        self.env_btn_group.idClicked.connect(lambda id: self.on_new_score_button_clicked("environment_interaction", id))
+        self.env_btn_group.setExclusive(False)
+        self.env_btn_group.buttonClicked.connect(
+            lambda btn: self._on_exclusive_score_click(self.env_btn_group, self.env_buttons, "environment_interaction", btn))
         
         for i in range(6):
             btn = QPushButton(str(i))
             btn.setCheckable(True)
-            btn.setFixedSize(25, 25)
+            btn.setFixedSize(score_btn_size, score_btn_size)
             btn.setStyleSheet("""
-                QPushButton { background-color: #f0f0f0; border: 1px solid #ccc; font-size: 10px; }
-                QPushButton:checked { background-color: #17a2b8; color: white; border: 1px solid #117a8b; }
+                QPushButton { background-color: #f0f0f0; border: 1px solid #ccc; font-size: 13px; font-weight: bold; }
+                QPushButton:checked { background-color: #17a2b8; color: white; border: 2px solid #117a8b; }
             """)
             self.env_btn_group.addButton(btn, i)
             detail_layout.addWidget(btn, 1, i+1)
             self.env_buttons[i] = btn
         
-        na_btn3 = QPushButton("N/A")
-        na_btn3.setCheckable(True)
-        na_btn3.setFixedSize(25, 25)
-        na_btn3.setStyleSheet("""
-            QPushButton { background-color: #f0f0f0; border: 1px solid #ccc; color: gray; font-size: 10px; }
-            QPushButton:checked { background-color: #999; color: white; }
-        """)
-        self.env_btn_group.addButton(na_btn3, -1)
-        detail_layout.addWidget(na_btn3, 1, 7)
-        na_btn3.setChecked(True)
-        self.env_buttons[-1] = na_btn3
-        
         # 人物契合度
         detail_layout.addWidget(QLabel("契合度:"), 2, 0)
         self.person_buttons = {}
         self.person_btn_group = QButtonGroup(self)
-        self.person_btn_group.setExclusive(True)
-        self.person_btn_group.idClicked.connect(lambda id: self.on_new_score_button_clicked("person_fit", id))
+        self.person_btn_group.setExclusive(False)
+        self.person_btn_group.buttonClicked.connect(
+            lambda btn: self._on_exclusive_score_click(self.person_btn_group, self.person_buttons, "person_fit", btn))
         
         for i in range(6):
             btn = QPushButton(str(i))
             btn.setCheckable(True)
-            btn.setFixedSize(25, 25)
+            btn.setFixedSize(score_btn_size, score_btn_size)
             btn.setStyleSheet("""
-                QPushButton { background-color: #f0f0f0; border: 1px solid #ccc; font-size: 10px; }
-                QPushButton:checked { background-color: #ffc107; color: black; border: 1px solid #d39e00; }
+                QPushButton { background-color: #f0f0f0; border: 1px solid #ccc; font-size: 13px; font-weight: bold; }
+                QPushButton:checked { background-color: #ffc107; color: black; border: 2px solid #d39e00; }
             """)
             self.person_btn_group.addButton(btn, i)
             detail_layout.addWidget(btn, 2, i+1)
             self.person_buttons[i] = btn
-        
-        na_btn4 = QPushButton("N/A")
-        na_btn4.setCheckable(True)
-        na_btn4.setFixedSize(25, 25)
-        na_btn4.setStyleSheet("""
-            QPushButton { background-color: #f0f0f0; border: 1px solid #ccc; color: gray; font-size: 10px; }
-            QPushButton:checked { background-color: #999; color: white; }
-        """)
-        self.person_btn_group.addButton(na_btn4, -1)
-        detail_layout.addWidget(na_btn4, 2, 7)
-        na_btn4.setChecked(True)
-        self.person_buttons[-1] = na_btn4
         
         score_layout.addLayout(detail_layout)
         layout.addWidget(score_group)
@@ -837,29 +838,6 @@ class PoseEditor(QMainWindow):
             "environment_interaction": self.env_buttons,
             "person_fit": self.person_buttons
         }
-
-        # --- 关键点列表 ---
-        layout.addWidget(QLabel("关键点列表:"))
-        self.keypoint_list = QListWidget()
-        self.keypoint_list.setMaximumHeight(180)
-        self.keypoint_list.itemClicked.connect(self.on_list_item_clicked)
-        layout.addWidget(self.keypoint_list)
-        self.update_keypoint_list()
-        
-        # --- 视图控制 ---
-        view_layout = QHBoxLayout()
-        self.focus_pose_btn = QPushButton("聚焦关键点 (W)")
-        self.focus_pose_btn.setToolTip("根据关键点位置缩放视图")
-        self.focus_pose_btn.clicked.connect(self.focus_on_pose)
-        view_layout.addWidget(self.focus_pose_btn)
-        self.fit_btn = QPushButton("适应全图 (E)")
-        self.fit_btn.setToolTip("缩放以显示完整图片")
-        self.fit_btn.clicked.connect(self.fit_to_window)
-        view_layout.addWidget(self.fit_btn)
-        self.skeleton_btn = QPushButton("隐藏骨架 (H)")
-        self.skeleton_btn.clicked.connect(self.toggle_skeleton)
-        view_layout.addWidget(self.skeleton_btn)
-        layout.addLayout(view_layout)
 
         # --- Inpainting 预览区 ---
         inpaint_group = QGroupBox("Inpainting 参考")
@@ -877,7 +855,6 @@ class PoseEditor(QMainWindow):
         self.inpaint_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         inpaint_layout.addWidget(self.inpaint_label)
         
-        # 在inpainting预览下方放操作说明
         self.inpaint_filename_label = QLabel("")
         self.inpaint_filename_label.setStyleSheet("color: #aaa; font-size: 10px;")
         self.inpaint_filename_label.setAlignment(Qt.AlignCenter)
@@ -888,9 +865,9 @@ class PoseEditor(QMainWindow):
         # --- 帮助说明（放在最底部，紧凑） ---
         help_text = QLabel(
             "左键:选中/拖拽 Ctrl+点击:瞬移 | 右键:平移 滚轮:缩放\n"
-            "A:遮挡▲ D:不可见✕ S:可见● | Tab/Shift+Tab:切换点\n"
-            "←→:翻页 Ctrl+→:下个需处理 | W:聚焦关键点 E:适应全图\n"
-            "H:骨架 Del:移至Ignore | Ctrl+Z/Y:撤销/重做"
+            "A:遮挡✕ S:可见● | Tab/Shift+Tab:切换点\n"
+            "←→:翻页 O:下个需处理 | W:聚焦关键点 E:适应全图\n"
+            "H:骨架 Ctrl+1~5:丢弃 Del:选择丢弃 | Ctrl+Z/Y:撤销/重做"
         )
         help_text.setStyleSheet("color: #777; font-size: 10px;")
         help_text.setWordWrap(True)
@@ -926,10 +903,8 @@ class PoseEditor(QMainWindow):
     def update_keypoint_list(self):
         self.keypoint_list.clear()
         for kp in self.canvas.pose_data.keypoints:
-            if kp.visibility == 2:
+            if kp.visibility == 1:
                 prefix = "● "
-            elif kp.visibility == 1:
-                prefix = "▲ "
             else:
                 prefix = "✕ "
             item = QListWidgetItem(prefix + kp.name)
@@ -957,6 +932,19 @@ class PoseEditor(QMainWindow):
         old_value = getattr(self.canvas.pose_data, score_type, -1)
         if old_value != value:
             setattr(self.canvas.pose_data, score_type, value)
+
+    def _on_exclusive_score_click(self, btn_group: QButtonGroup, buttons: dict, score_type: str, clicked_btn: QPushButton):
+        """手动实现互斥选中（不用N/A，允许全不选表示未评分）"""
+        clicked_id = btn_group.id(clicked_btn)
+        # 取消同组其他按钮
+        for btn in btn_group.buttons():
+            if btn is not clicked_btn:
+                btn.setChecked(False)
+        # 如果点击已选中的按钮则取消（变回未评分）
+        if clicked_btn.isChecked():
+            setattr(self.canvas.pose_data, score_type, clicked_id)
+        else:
+            setattr(self.canvas.pose_data, score_type, -1)
 
     def on_skip_button_clicked(self, reason: str):
         """已废弃 - 由 move_to_ignore_category 替代"""
@@ -1061,8 +1049,20 @@ class PoseEditor(QMainWindow):
         # 更新 meta.json
         self._update_meta()
         
+        # 读取上次处理到的图片
+        meta = self._read_meta()
+        last_image = meta.get("last_image", "")
+        
         # 扫描图片
         self.load_images_from_folder(str(self.origin_dir))
+        
+        # 恢复到上次处理的位置
+        if last_image and self.image_files:
+            for i, f in enumerate(self.image_files):
+                if f.name == last_image:
+                    self.current_index = i
+                    self.load_current_image()
+                    break
         
         # 更新项目路径显示
         if self.project_root:
@@ -1075,15 +1075,7 @@ class PoseEditor(QMainWindow):
             return
         
         meta_path = self.project_root / META_FILE
-        meta = {}
-        
-        # 读取已有的 meta
-        if meta_path.exists():
-            try:
-                with open(meta_path, 'r', encoding='utf-8') as f:
-                    meta = json.load(f)
-            except Exception:
-                meta = {}
+        meta = self._read_meta()
         
         # 更新字段
         import getpass
@@ -1106,11 +1098,39 @@ class PoseEditor(QMainWindow):
                        if f.is_file() and f.suffix.lower() in image_extensions)
             meta["total_images"] = count
         
+        self._write_meta(meta)
+    
+    def _read_meta(self) -> dict:
+        """读取 meta.json"""
+        if not self.project_root:
+            return {}
+        meta_path = self.project_root / META_FILE
+        if meta_path.exists():
+            try:
+                with open(meta_path, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except Exception:
+                return {}
+        return {}
+    
+    def _write_meta(self, meta: dict):
+        """写入 meta.json"""
+        if not self.project_root:
+            return
+        meta_path = self.project_root / META_FILE
         try:
             with open(meta_path, 'w', encoding='utf-8') as f:
                 json.dump(meta, f, indent=2, ensure_ascii=False)
         except Exception as e:
             print(f"Warning: failed to write meta.json: {e}")
+    
+    def _save_last_image_to_meta(self):
+        """将当前处理的图片文件名记录到 meta.json"""
+        if not self.project_root or not self.current_image_path:
+            return
+        meta = self._read_meta()
+        meta["last_image"] = Path(self.current_image_path).name
+        self._write_meta(meta)
 
     def _find_inpainting_image(self, image_name_stem: str) -> Optional[Path]:
         """在 inpainting/ 目录中查找同名（不同后缀也可以）的参考图"""
@@ -1221,7 +1241,7 @@ class PoseEditor(QMainWindow):
         """[Delete键] 弹出选择对话框"""
         if not self.current_image_path:
             return
-        items = ["美感不足", "图像模糊", "比例失调", "场景图失真", "其他原因"]
+        items = ["美感不足", "难以补全", "背景失真", "比例失调", "图像模糊", "其他原因"]
         item, ok = QInputDialog.getItem(self, "选择ignore类别", "请选择跳过原因:", items, 0, False)
         if ok and item:
             if item == "其他原因":
@@ -1279,7 +1299,7 @@ class PoseEditor(QMainWindow):
         
         if self.canvas.selected_keypoint:
             kp = self.canvas.selected_keypoint
-            vis_map = {0: "不可见", 1: "遮挡", 2: "可见"}
+            vis_map = {0: "遮挡", 1: "可见"}
             status += f" | 选中: {kp.name} ({vis_map[kp.visibility]})"
             
         self.status_bar.showMessage(status)
@@ -1367,23 +1387,24 @@ class PoseEditor(QMainWindow):
             self.canvas.fit_to_window()
     
     def update_score_ui(self, pose_data: PoseData):
+        # 先全部取消选中，再设置正确的值
+        for btn in self.novelty_btn_group.buttons():
+            btn.setChecked(False)
         novelty = pose_data.novelty
         if novelty >= 0 and novelty in self.novelty_buttons:
             self.novelty_buttons[novelty].setChecked(True)
-        else:
-            self.novelty_buttons[-1].setChecked(True)
         
+        for btn in self.env_btn_group.buttons():
+            btn.setChecked(False)
         env_int = pose_data.environment_interaction
         if env_int >= 0 and env_int in self.env_buttons:
             self.env_buttons[env_int].setChecked(True)
-        else:
-            self.env_buttons[-1].setChecked(True)
         
+        for btn in self.person_btn_group.buttons():
+            btn.setChecked(False)
         person_fit = pose_data.person_fit
         if person_fit >= 0 and person_fit in self.person_buttons:
             self.person_buttons[person_fit].setChecked(True)
-        else:
-            self.person_buttons[-1].setChecked(True)
         
     def save_current(self):
         if not self.current_annotation_path: return
@@ -1395,6 +1416,10 @@ class PoseEditor(QMainWindow):
             data = [self.canvas.pose_data.to_dict()]
             with open(self.current_annotation_path, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
+            
+            # 记录当前处理位置
+            self._save_last_image_to_meta()
+            
             self.status_bar.showMessage(f"已保存: {ann_path.name}", 2000)
         except Exception as e:
             QMessageBox.warning(self, "错误", f"保存失败: {e}")
@@ -1431,7 +1456,11 @@ class PoseEditor(QMainWindow):
         QMessageBox.information(self, "提示", "没有更多需要处理的图片")
             
     def should_process_image(self) -> bool:
-        return not self.canvas.pose_data.skip_reason
+        """判断当前图片是否还需要处理（评分不完整）"""
+        pose = self.canvas.pose_data
+        if pose.skip_reason:
+            return False  # 已标记跳过
+        return not self.has_complete_scores()
             
     def fit_to_window(self):
         self.canvas.fit_to_window()
@@ -1441,7 +1470,7 @@ class PoseEditor(QMainWindow):
         
     def toggle_skeleton(self):
         self.canvas.show_skeleton = not self.canvas.show_skeleton
-        self.skeleton_btn.setText("显示骨架" if not self.canvas.show_skeleton else "隐藏骨架 (H)")
+        self.skeleton_btn.setText("骨架 (H)" if self.canvas.show_skeleton else "骨架OFF")
         self.canvas.update()
         
     def undo(self):
@@ -1458,16 +1487,21 @@ class PoseEditor(QMainWindow):
         """使用 QShortcut 注册全局快捷键，避免焦点问题"""
         QShortcut(QKeySequence(Qt.Key_Left), self, self.prev_image)
         QShortcut(QKeySequence(Qt.Key_Right), self, self.next_image)
-        QShortcut(QKeySequence(Qt.ControlModifier | Qt.Key_Right), self, self.next_processable_image)
+        QShortcut(QKeySequence(Qt.Key_O), self, self.next_processable_image)
         QShortcut(QKeySequence(Qt.Key_Tab), self, lambda: self.switch_keypoint(1))
         QShortcut(QKeySequence(Qt.ShiftModifier | Qt.Key_Tab), self, lambda: self.switch_keypoint(-1))
         QShortcut(QKeySequence(Qt.Key_H), self, self.toggle_skeleton)
         QShortcut(QKeySequence(Qt.Key_Delete), self, self.move_to_ignore)
         QShortcut(QKeySequence(Qt.Key_W), self, self.focus_on_pose)
         QShortcut(QKeySequence(Qt.Key_E), self, self.fit_to_window)
-        # A/D/S 用于切换可见性，需要转发给 canvas
+        # Ctrl+1/2/3/4/5 对应五个丢弃理由
+        QShortcut(QKeySequence("Ctrl+1"), self, lambda: self.move_to_ignore_category("美感不足"))
+        QShortcut(QKeySequence("Ctrl+2"), self, lambda: self.move_to_ignore_category("难以补全"))
+        QShortcut(QKeySequence("Ctrl+3"), self, lambda: self.move_to_ignore_category("背景失真"))
+        QShortcut(QKeySequence("Ctrl+4"), self, lambda: self.move_to_ignore_category("比例失调"))
+        QShortcut(QKeySequence("Ctrl+5"), self, lambda: self.move_to_ignore_category("图像模糊"))
+        # A/S 用于切换可见性，需要转发给 canvas
         QShortcut(QKeySequence(Qt.Key_A), self, lambda: self.canvas.keyPressEvent(QKeyEvent(QEvent.KeyPress, Qt.Key_A, Qt.NoModifier)))
-        QShortcut(QKeySequence(Qt.Key_D), self, lambda: self.canvas.keyPressEvent(QKeyEvent(QEvent.KeyPress, Qt.Key_D, Qt.NoModifier)))
         QShortcut(QKeySequence(Qt.Key_S), self, lambda: self.canvas.keyPressEvent(QKeyEvent(QEvent.KeyPress, Qt.Key_S, Qt.NoModifier)))
             
     def switch_keypoint(self, direction: int):
