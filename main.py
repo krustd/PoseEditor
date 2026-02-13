@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QPointF, QRectF, Signal, QObject, QTimer, QEvent
 from PySide6.QtGui import (
     QPixmap, QImage, QPainter, QPen, QBrush, QColor, 
-    QMouseEvent, QKeyEvent, QWheelEvent, QAction
+    QMouseEvent, QKeyEvent, QWheelEvent, QAction, QShortcut, QKeySequence
 )
 
 
@@ -637,6 +637,7 @@ class PoseEditor(QMainWindow):
         self.setStatusBar(self.status_bar)
         self.update_status()
         self.create_menu_bar()
+        self._setup_shortcuts()
         
     def create_control_panel(self) -> QWidget:
         panel = QFrame()
@@ -847,11 +848,11 @@ class PoseEditor(QMainWindow):
         
         # --- 视图控制 ---
         view_layout = QHBoxLayout()
-        self.focus_pose_btn = QPushButton("聚焦关键点")
+        self.focus_pose_btn = QPushButton("聚焦关键点 (W)")
         self.focus_pose_btn.setToolTip("根据关键点位置缩放视图")
         self.focus_pose_btn.clicked.connect(self.focus_on_pose)
         view_layout.addWidget(self.focus_pose_btn)
-        self.fit_btn = QPushButton("适应全图")
+        self.fit_btn = QPushButton("适应全图 (E)")
         self.fit_btn.setToolTip("缩放以显示完整图片")
         self.fit_btn.clicked.connect(self.fit_to_window)
         view_layout.addWidget(self.fit_btn)
@@ -888,7 +889,8 @@ class PoseEditor(QMainWindow):
         help_text = QLabel(
             "左键:选中/拖拽 Ctrl+点击:瞬移 | 右键:平移 滚轮:缩放\n"
             "A:遮挡▲ D:不可见✕ S:可见● | Tab/Shift+Tab:切换点\n"
-            "←→:翻页 Ctrl+→:下个需处理 | Ctrl+Z/Y:撤销/重做"
+            "←→:翻页 Ctrl+→:下个需处理 | W:聚焦关键点 E:适应全图\n"
+            "H:骨架 Del:移至Ignore | Ctrl+Z/Y:撤销/重做"
         )
         help_text.setStyleSheet("color: #777; font-size: 10px;")
         help_text.setWordWrap(True)
@@ -1452,27 +1454,21 @@ class PoseEditor(QMainWindow):
             self.canvas.update()
             self.update_keypoint_list()
         
-    def keyPressEvent(self, event: QKeyEvent):
-        key = event.key()
-        
-        if key == Qt.Key_Left:
-            self.prev_image()
-        elif key == Qt.Key_Right and not (event.modifiers() & Qt.ControlModifier):
-            self.next_image()
-        elif key == Qt.Key_Right and event.modifiers() & Qt.ControlModifier:
-            self.next_processable_image()
-        elif key == Qt.Key_Tab:
-            self.switch_keypoint(1)
-        elif key == Qt.Key_Backtab:
-            self.switch_keypoint(-1)
-        elif key == Qt.Key_S and event.modifiers() & Qt.ControlModifier:
-            self.save_current()
-        elif key == Qt.Key_H:
-            self.toggle_skeleton()
-        elif key == Qt.Key_Delete:
-            self.move_to_ignore()
-        else:
-            self.canvas.keyPressEvent(event)
+    def _setup_shortcuts(self):
+        """使用 QShortcut 注册全局快捷键，避免焦点问题"""
+        QShortcut(QKeySequence(Qt.Key_Left), self, self.prev_image)
+        QShortcut(QKeySequence(Qt.Key_Right), self, self.next_image)
+        QShortcut(QKeySequence(Qt.ControlModifier | Qt.Key_Right), self, self.next_processable_image)
+        QShortcut(QKeySequence(Qt.Key_Tab), self, lambda: self.switch_keypoint(1))
+        QShortcut(QKeySequence(Qt.ShiftModifier | Qt.Key_Tab), self, lambda: self.switch_keypoint(-1))
+        QShortcut(QKeySequence(Qt.Key_H), self, self.toggle_skeleton)
+        QShortcut(QKeySequence(Qt.Key_Delete), self, self.move_to_ignore)
+        QShortcut(QKeySequence(Qt.Key_W), self, self.focus_on_pose)
+        QShortcut(QKeySequence(Qt.Key_E), self, self.fit_to_window)
+        # A/D/S 用于切换可见性，需要转发给 canvas
+        QShortcut(QKeySequence(Qt.Key_A), self, lambda: self.canvas.keyPressEvent(QKeyEvent(QEvent.KeyPress, Qt.Key_A, Qt.NoModifier)))
+        QShortcut(QKeySequence(Qt.Key_D), self, lambda: self.canvas.keyPressEvent(QKeyEvent(QEvent.KeyPress, Qt.Key_D, Qt.NoModifier)))
+        QShortcut(QKeySequence(Qt.Key_S), self, lambda: self.canvas.keyPressEvent(QKeyEvent(QEvent.KeyPress, Qt.Key_S, Qt.NoModifier)))
             
     def switch_keypoint(self, direction: int):
         if not self.canvas.pose_data.keypoints: return
