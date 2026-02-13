@@ -847,7 +847,12 @@ class PoseEditor(QMainWindow):
         
         # --- 视图控制 ---
         view_layout = QHBoxLayout()
-        self.fit_btn = QPushButton("重置视图")
+        self.focus_pose_btn = QPushButton("聚焦关键点")
+        self.focus_pose_btn.setToolTip("根据关键点位置缩放视图")
+        self.focus_pose_btn.clicked.connect(self.focus_on_pose)
+        view_layout.addWidget(self.focus_pose_btn)
+        self.fit_btn = QPushButton("适应全图")
+        self.fit_btn.setToolTip("缩放以显示完整图片")
         self.fit_btn.clicked.connect(self.fit_to_window)
         view_layout.addWidget(self.fit_btn)
         self.skeleton_btn = QPushButton("隐藏骨架 (H)")
@@ -1428,6 +1433,9 @@ class PoseEditor(QMainWindow):
             
     def fit_to_window(self):
         self.canvas.fit_to_window()
+
+    def focus_on_pose(self):
+        self.canvas.focus_on_pose()
         
     def toggle_skeleton(self):
         self.canvas.show_skeleton = not self.canvas.show_skeleton
