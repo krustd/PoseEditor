@@ -1,6 +1,7 @@
 import sys
 import json
 import shutil
+from datetime import datetime
 from pathlib import Path
 from typing import List, Tuple, Optional, Dict, Any
 
@@ -8,13 +9,23 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
     QLabel, QStatusBar, QListWidget, QListWidgetItem, QPushButton,
     QFileDialog, QMessageBox, QSplitter, QFrame, QSpinBox, QGroupBox,
-    QButtonGroup, QGridLayout, QInputDialog, QToolTip
+    QButtonGroup, QGridLayout, QInputDialog, QToolTip, QScrollArea,
+    QSizePolicy
 )
 from PySide6.QtCore import Qt, QPointF, QRectF, Signal, QObject, QTimer, QEvent
 from PySide6.QtGui import (
     QPixmap, QImage, QPainter, QPen, QBrush, QColor, 
     QMouseEvent, QKeyEvent, QWheelEvent, QAction
 )
+
+
+# ============================================================
+# 项目文件夹结构常量
+# ============================================================
+DIR_ORIGIN   = "images"           # 原图
+DIR_JSON     = "annotations"      # 标注JSON
+DIR_INPAINT  = "inpainting"       # inpainting参考图
+META_FILE    = "meta.json"        # 项目元数据
 
 
 class DelayedTooltipFilter(QObject):
@@ -281,7 +292,6 @@ class Canvas(QWidget):
         
     def set_image(self, image: QImage):
         self.image = image
-        # 注意：这里不再自动调用 fit_to_window，由外部根据数据情况决定调用哪个缩放方法
         self.update()
         
     def set_pose_data(self, pose_data: PoseData):
@@ -304,24 +314,21 @@ class Canvas(QWidget):
         self.update()
 
     def focus_on_pose(self):
-        """[新增功能] 聚焦于姿态所在的局部区域"""
+        """聚焦于姿态所在的局部区域"""
         if not self.image or not self.pose_data.has_valid_keypoints():
             self.fit_to_window()
             return
 
         min_x, min_y, max_x, max_y = self.pose_data.get_bounding_box()
         
-        # 计算包围盒宽高
         bbox_w = max_x - min_x
         bbox_h = max_y - min_y
         
-        # 如果包围盒太小，回退到全图
         if bbox_w < 10 or bbox_h < 10:
             self.fit_to_window()
             return
 
-        # 增加一些边距 (padding)
-        padding_x = bbox_w * 0.5  # 左右各留50%宽度的空间
+        padding_x = bbox_w * 0.5
         padding_y = bbox_h * 0.5
         
         target_x = min_x - padding_x / 2
@@ -331,17 +338,11 @@ class Canvas(QWidget):
 
         widget_size = self.size()
         
-        # 计算缩放比例
         scale_x = widget_size.width() / target_w
         scale_y = widget_size.height() / target_h
         new_scale = min(scale_x, scale_y)
         
-        # 限制最大放大倍数，防止模糊过度
         self.scale = min(new_scale, 5.0) 
-        
-        # 计算偏移量：使得 target_rect 的中心对齐 widget 的中心
-        # image_pixel * scale + offset = screen_pixel
-        # offset = screen_pixel_center - image_pixel_center * scale
         
         center_x = target_x + target_w / 2
         center_y = target_y + target_h / 2
@@ -387,49 +388,87 @@ class Canvas(QWidget):
             self.draw_skeleton(painter)
         self.draw_keypoints(painter)
         
+    # 骨骼连接的颜色分类
+    SKELETON_COLORS = {
+        (0, 1): QColor(100, 200, 100, 150),
+        (0, 2): QColor(100, 200, 100, 150),
+        (5, 6): QColor(100, 200, 100, 150),
+        (11, 12): QColor(100, 200, 100, 150),
+        (1, 3): QColor(255, 120, 100, 150),
+        (5, 7): QColor(255, 120, 100, 150),
+        (7, 9): QColor(255, 150, 80, 150),
+        (5, 11): QColor(230, 100, 70, 150),
+        (11, 13): QColor(230, 120, 80, 150),
+        (13, 15): QColor(240, 150, 90, 150),
+        (2, 4): QColor(80, 160, 255, 150),
+        (6, 8): QColor(80, 160, 255, 150),
+        (8, 10): QColor(110, 190, 255, 150),
+        (6, 12): QColor(70, 120, 230, 150),
+        (12, 14): QColor(90, 140, 240, 150),
+        (14, 16): QColor(120, 170, 245, 150),
+    }
+
     def draw_skeleton(self, painter: QPainter):
         if not self.image: return
         painter.save()
         painter.translate(self.offset)
         painter.scale(self.scale, self.scale)
-        pen = QPen(QColor(100, 200, 100, 150), 2)
-        painter.setPen(pen)
         for start_idx, end_idx in self.skeleton:
             start_kp = self.pose_data.keypoints[start_idx]
             end_kp = self.pose_data.keypoints[end_idx]
             if start_kp.visibility > 0 and end_kp.visibility > 0:
+                color = self.SKELETON_COLORS.get((start_idx, end_idx), QColor(100, 200, 100, 150))
+                painter.setPen(QPen(color, 2))
                 painter.drawLine(QPointF(start_kp.x, start_kp.y), 
                                QPointF(end_kp.x, end_kp.y))
         painter.restore()
         
+    KEYPOINT_COLORS = {
+        0:  QColor(100, 220, 100),
+        1:  QColor(255, 120, 120),
+        3:  QColor(255, 80, 80),
+        5:  QColor(255, 100, 50),
+        7:  QColor(255, 140, 60),
+        9:  QColor(255, 180, 80),
+        11: QColor(220, 80, 60),
+        13: QColor(230, 120, 80),
+        15: QColor(240, 160, 100),
+        2:  QColor(100, 180, 255),
+        4:  QColor(60, 140, 255),
+        6:  QColor(80, 120, 255),
+        8:  QColor(100, 160, 240),
+        10: QColor(130, 200, 255),
+        12: QColor(80, 80, 220),
+        14: QColor(100, 120, 230),
+        16: QColor(140, 160, 240),
+    }
+
     def draw_keypoints(self, painter: QPainter):
         if not self.image: return
         painter.save()
         painter.translate(self.offset)
         painter.scale(self.scale, self.scale)
         
-        # 统一颜色
-        normal_color = QColor(0, 200, 255, int(255 * self.keypoint_opacity))
-        normal_border = QColor(0, 0, 0)
         selected_color = QColor(255, 255, 0)
         selected_border = QColor(0, 0, 0)
+        normal_border = QColor(0, 0, 0)
         
         for i, kp in enumerate(self.pose_data.keypoints):
             is_selected = (self.selected_keypoint == kp)
-            fill_color = selected_color if is_selected else normal_color
+            base_color = self.KEYPOINT_COLORS.get(i, QColor(200, 200, 200))
+            base_color.setAlpha(int(255 * self.keypoint_opacity))
+            fill_color = selected_color if is_selected else base_color
             border_color = selected_border if is_selected else normal_border
             
             radius = 5 / self.scale
             pen_width = 1.5 / self.scale
             
             if kp.visibility == 2:
-                # 可见 = 圆形（实心）
                 painter.setBrush(QBrush(fill_color))
                 painter.setPen(QPen(border_color, pen_width))
                 painter.drawEllipse(QPointF(kp.x, kp.y), radius, radius)
                 
             elif kp.visibility == 1:
-                # 遮挡 = 三角形（实心）
                 from PySide6.QtGui import QPolygonF
                 tri_size = radius * 1.3
                 triangle = QPolygonF([
@@ -442,7 +481,6 @@ class Canvas(QWidget):
                 painter.drawPolygon(triangle)
                 
             else:
-                # 不可见 = 叉号
                 cross_size = radius * 0.9
                 cross_pen = QPen(fill_color, pen_width * 2)
                 cross_pen.setCapStyle(Qt.RoundCap)
@@ -529,7 +567,7 @@ class Canvas(QWidget):
         scale_factor = 1.1 if delta > 0 else 0.9
         new_scale = self.scale * scale_factor
         
-        if 0.1 <= new_scale <= 20.0: # 允许更大的放大倍数
+        if 0.1 <= new_scale <= 20.0:
             self.scale = new_scale
             image_pos_after = self.widget_to_image(mouse_pos)
             offset_delta = QPointF(
@@ -564,15 +602,21 @@ class PoseEditor(QMainWindow):
         self.image_files = []
         self.current_index = 0
         
+        # 项目文件夹路径
+        self.project_root = None       # 项目根目录
+        self.origin_dir = None         # images/
+        self.json_dir = None           # annotations/
+        self.inpaint_dir = None        # inpainting/
+        
         # 新增评分和跳过按钮的引用
-        self.score_buttons = {}  # 存储评分按钮的引用
-        self.skip_buttons = []   # 存储跳过按钮的引用
+        self.score_buttons = {}
+        self.skip_buttons = []
         
         self.init_ui()
         
     def init_ui(self):
-        self.setWindowTitle("姿态标注修正工具 v2.0")
-        self.setGeometry(100, 100, 1300, 850)
+        self.setWindowTitle("姿态标注修正工具 v2.1")
+        self.setGeometry(100, 100, 1400, 900)
         
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
@@ -587,7 +631,7 @@ class PoseEditor(QMainWindow):
         
         control_panel = self.create_control_panel()
         splitter.addWidget(control_panel)
-        splitter.setSizes([900, 400])
+        splitter.setSizes([950, 400])
         
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
@@ -596,51 +640,103 @@ class PoseEditor(QMainWindow):
         
     def create_control_panel(self) -> QWidget:
         panel = QFrame()
-        panel.setMaximumWidth(350)
+        panel.setMaximumWidth(380)
         layout = QVBoxLayout(panel)
+        layout.setSpacing(4)
+        layout.setContentsMargins(4, 4, 4, 4)
         
         # --- 文件操作区 ---
-        file_group = QGroupBox("文件操作")
+        file_group = QGroupBox("项目")
         file_layout = QVBoxLayout(file_group)
+        file_layout.setSpacing(4)
         
-        self.open_btn = QPushButton("打开图片文件夹")
+        self.open_btn = QPushButton("打开项目文件夹")
+        self.open_btn.setToolTip(
+            "选择项目根目录，工具会自动识别或创建子目录：\n"
+            f"  {DIR_ORIGIN}/  — 原图\n"
+            f"  {DIR_JSON}/  — 标注JSON\n"
+            f"  {DIR_INPAINT}/  — Inpainting参考图\n"
+            f"  {META_FILE}  — 协作元数据"
+        )
         self.open_btn.clicked.connect(self.open_folder)
         file_layout.addWidget(self.open_btn)
         
+        # 项目路径显示
+        self.project_path_label = QLabel("未打开项目")
+        self.project_path_label.setStyleSheet("color: #888; font-size: 10px;")
+        self.project_path_label.setWordWrap(True)
+        file_layout.addWidget(self.project_path_label)
+        
         nav_layout = QHBoxLayout()
-        self.prev_btn = QPushButton("上一张 (←)")
+        self.prev_btn = QPushButton("← 上一张")
         self.prev_btn.clicked.connect(self.prev_image)
-        self.next_btn = QPushButton("下一张 (→)")
+        self.next_btn = QPushButton("下一张 →")
         self.next_btn.clicked.connect(self.next_image)
-        # self.next_processable_btn = QPushButton("下个需处理 (Ctrl+→)")
-        # self.next_processable_btn.clicked.connect(self.next_processable_image   )
-        # self.next_processable_btn.setStyleSheet("background-color: #e6f7ff; font-weight: bold;")
         nav_layout.addWidget(self.prev_btn)
         nav_layout.addWidget(self.next_btn)
-        # nav_layout.addWidget(self.next_processable_btn)
         file_layout.addLayout(nav_layout)
         
         self.save_btn = QPushButton("保存 (Ctrl+S)")
         self.save_btn.clicked.connect(self.save_current)
         file_layout.addWidget(self.save_btn)
         
-        # # [新增功能 2] 废弃按钮
-        # self.ignore_btn = QPushButton("标记为废弃/移动到Ignore (Del)")
-        # self.ignore_btn.setStyleSheet("background-color: #ffcccc; color: darkred;")
-        # self.ignore_btn.clicked.connect(self.move_to_ignore)
-        # file_layout.addWidget(self.ignore_btn)
-        
         layout.addWidget(file_group)
         
-        # --- 评分系统 ---
-        score_group = QGroupBox("姿态评分系统")
-        score_layout = QVBoxLayout(score_group)
+        # --- 移至Ignore ---
+        skip_group = QGroupBox("移至Ignore（不可撤销）")
+        skip_layout = QHBoxLayout(skip_group)
+        skip_layout.setSpacing(4)
         
-        # 评分区域
+        ignore_btn_style = """
+            QPushButton { 
+                background-color: #fff3cd; border: 1px solid #ffc107; 
+                padding: 4px 6px; color: #856404; font-size: 11px;
+            }
+            QPushButton:hover { background-color: #ffc107; color: white; }
+        """
+        
+        self.ignore_aesthetic_btn = QPushButton("美感不足")
+        self.ignore_aesthetic_btn.setToolTip("美感不足。如果图像不是具有美感的人物照片（例如日常照片），则可点击该按钮跳过。")
+        self.ignore_aesthetic_btn.clicked.connect(lambda: self.move_to_ignore_category("美感不足"))
+        self.ignore_aesthetic_btn.setStyleSheet(ignore_btn_style)
+        skip_layout.addWidget(self.ignore_aesthetic_btn)
+        
+        self.ignore_blur_btn = QPushButton("图像模糊")
+        self.ignore_blur_btn.setToolTip("图像模糊。如果图像分辨率很低，或图像质量不佳，则可点它跳过。")
+        self.ignore_blur_btn.clicked.connect(lambda: self.move_to_ignore_category("图像模糊"))
+        self.ignore_blur_btn.setStyleSheet(ignore_btn_style)
+        skip_layout.addWidget(self.ignore_blur_btn)
+        
+        self.ignore_size_btn = QPushButton("比例失调")
+        self.ignore_size_btn.setToolTip("比例失调。如果人物占画面的比例非常小或大，无法确定姿态，则点它跳过。")
+        self.ignore_size_btn.clicked.connect(lambda: self.move_to_ignore_category("比例失调"))
+        self.ignore_size_btn.setStyleSheet(ignore_btn_style)
+        skip_layout.addWidget(self.ignore_size_btn)
+        
+        self.ignore_scene_btn = QPushButton("背景失真")
+        self.ignore_scene_btn.setToolTip("背景图失真。这里的图像是将人物图像中的人物区域给删除修复得到的无人场景图。如果该图像有异常纹理等不真实的情况，则点它跳过。")
+        self.ignore_scene_btn.clicked.connect(lambda: self.move_to_ignore_category("场景图失真"))
+        self.ignore_scene_btn.setStyleSheet(ignore_btn_style)
+        skip_layout.addWidget(self.ignore_scene_btn)
+        
+        layout.addWidget(skip_group)
+        
+        # 安装延迟tooltip过滤器
+        self.tooltip_filter = DelayedTooltipFilter(self)
+        for btn in [self.ignore_aesthetic_btn, self.ignore_blur_btn, 
+                     self.ignore_size_btn, self.ignore_scene_btn]:
+            btn.installEventFilter(self.tooltip_filter)
+        
+        # --- 评分系统 ---
+        score_group = QGroupBox("姿态评分")
+        score_layout = QVBoxLayout(score_group)
+        score_layout.setSpacing(2)
+        
         detail_layout = QGridLayout()
+        detail_layout.setSpacing(2)
         
         # 姿势新奇度
-        detail_layout.addWidget(QLabel("姿势新奇度:"), 0, 0)
+        detail_layout.addWidget(QLabel("新奇度:"), 0, 0)
         self.novelty_buttons = {}
         self.novelty_btn_group = QButtonGroup(self)
         self.novelty_btn_group.setExclusive(True)
@@ -671,7 +767,7 @@ class PoseEditor(QMainWindow):
         self.novelty_buttons[-1] = na_btn2
         
         # 环境互动性
-        detail_layout.addWidget(QLabel("环境互动性:"), 1, 0)
+        detail_layout.addWidget(QLabel("互动性:"), 1, 0)
         self.env_buttons = {}
         self.env_btn_group = QButtonGroup(self)
         self.env_btn_group.setExclusive(True)
@@ -702,7 +798,7 @@ class PoseEditor(QMainWindow):
         self.env_buttons[-1] = na_btn3
         
         # 人物契合度
-        detail_layout.addWidget(QLabel("人物契合度:"), 2, 0)
+        detail_layout.addWidget(QLabel("契合度:"), 2, 0)
         self.person_buttons = {}
         self.person_btn_group = QButtonGroup(self)
         self.person_btn_group.setExclusive(True)
@@ -733,104 +829,73 @@ class PoseEditor(QMainWindow):
         self.person_buttons[-1] = na_btn4
         
         score_layout.addLayout(detail_layout)
-        
-        # 跳过按钮区域 - 点击后移动到 ignore 对应子文件夹（放在评分上方）
-        skip_group = QGroupBox("移至Ignore（不可撤销）")
-        skip_layout = QHBoxLayout(skip_group)
-        skip_layout.setSpacing(6)
-        
-        ignore_btn_style = """
-            QPushButton { 
-                background-color: #fff3cd; border: 1px solid #ffc107; 
-                padding: 6px 10px; color: #856404; font-size: 12px;
-            }
-            QPushButton:hover { background-color: #ffc107; color: white; }
-        """
-        
-        self.ignore_aesthetic_btn = QPushButton("美感不足")
-        self.ignore_aesthetic_btn.setToolTip("美感不足。如果图像不是具有美感的人物照片（例如日常照片），则可点击该按钮跳过。")
-        self.ignore_aesthetic_btn.clicked.connect(lambda: self.move_to_ignore_category("美感不足"))
-        self.ignore_aesthetic_btn.setStyleSheet(ignore_btn_style)
-        skip_layout.addWidget(self.ignore_aesthetic_btn)
-        
-        self.ignore_blur_btn = QPushButton("图像模糊")
-        self.ignore_blur_btn.setToolTip("图像模糊。如果图像分辨率很低，或图像质量不佳，则可点它跳过。")
-        self.ignore_blur_btn.clicked.connect(lambda: self.move_to_ignore_category("图像模糊"))
-        self.ignore_blur_btn.setStyleSheet(ignore_btn_style)
-        skip_layout.addWidget(self.ignore_blur_btn)
-        
-        self.ignore_size_btn = QPushButton("比例失调")
-        self.ignore_size_btn.setToolTip("比例失调。如果人物占画面的比例非常小或大，无法确定姿态，则点它跳过。")
-        self.ignore_size_btn.clicked.connect(lambda: self.move_to_ignore_category("比例失调"))
-        self.ignore_size_btn.setStyleSheet(ignore_btn_style)
-        skip_layout.addWidget(self.ignore_size_btn)
-        
-        self.ignore_scene_btn = QPushButton("场景图失真")
-        self.ignore_scene_btn.setToolTip("场景图失真。这里的图像是将人物图像中的人物区域给删除修复得到的无人场景图。如果该图像有异常纹理等不真实的情况，则点它跳过。")
-        self.ignore_scene_btn.clicked.connect(lambda: self.move_to_ignore_category("场景图失真"))
-        self.ignore_scene_btn.setStyleSheet(ignore_btn_style)
-        skip_layout.addWidget(self.ignore_scene_btn)
-        
-        # 添加跳过组（在评分上方）和评分组到主布局
-        layout.addWidget(skip_group)
         layout.addWidget(score_group)
         
-        # 安装延迟tooltip过滤器（悬浮2秒后显示详细说明）
-        self.tooltip_filter = DelayedTooltipFilter(self)
-        for btn in [self.ignore_aesthetic_btn, self.ignore_blur_btn, 
-                     self.ignore_size_btn, self.ignore_scene_btn]:
-            btn.installEventFilter(self.tooltip_filter)
-        
-        # 保存评分按钮引用以便后续更新
         self.score_buttons = {
             "novelty": self.novelty_buttons,
             "environment_interaction": self.env_buttons,
             "person_fit": self.person_buttons
         }
-        
 
         # --- 关键点列表 ---
         layout.addWidget(QLabel("关键点列表:"))
         self.keypoint_list = QListWidget()
+        self.keypoint_list.setMaximumHeight(180)
         self.keypoint_list.itemClicked.connect(self.on_list_item_clicked)
         layout.addWidget(self.keypoint_list)
         self.update_keypoint_list()
         
         # --- 视图控制 ---
-        view_group = QGroupBox("视图控制")
-        view_layout = QVBoxLayout(view_group)
-        
-        self.fit_btn = QPushButton("适应窗口 / 重置视图")
+        view_layout = QHBoxLayout()
+        self.fit_btn = QPushButton("重置视图")
         self.fit_btn.clicked.connect(self.fit_to_window)
         view_layout.addWidget(self.fit_btn)
-        
         self.skeleton_btn = QPushButton("隐藏骨架 (H)")
         self.skeleton_btn.clicked.connect(self.toggle_skeleton)
         view_layout.addWidget(self.skeleton_btn)
+        layout.addLayout(view_layout)
+
+        # --- Inpainting 预览区 ---
+        inpaint_group = QGroupBox("Inpainting 参考")
+        inpaint_layout = QVBoxLayout(inpaint_group)
+        inpaint_layout.setContentsMargins(4, 4, 4, 4)
+        inpaint_layout.setSpacing(2)
         
-        layout.addWidget(view_group)
-        
-        # --- 帮助 ---
-        help_text = QLabel(
-            "• 左键: 选中/拖拽 (Ctrl+点击=瞬移)\n"
-            "• 右键: 平移画布 | 滚轮: 缩放\n"
-            "• A: 遮挡(▲) | D: 不可见(✕) | S: 可见(●)\n"
-            "• Tab/Shift+Tab: 切换点 | Delete: 移至Ignore\n"
-            "• ←/→: 上一张/下一张 | Ctrl+→: 下个需处理\n"
-            "• Ctrl+Z/Y: 撤销/重做 | Ctrl+S: 保存\n"
-            "• Ignore分类: 美感不足/图像模糊/比例失调/场景图失真"
+        self.inpaint_label = QLabel("打开项目后自动加载")
+        self.inpaint_label.setAlignment(Qt.AlignCenter)
+        self.inpaint_label.setMinimumHeight(120)
+        self.inpaint_label.setMaximumHeight(200)
+        self.inpaint_label.setStyleSheet(
+            "background-color: #3a3a3a; color: #888; border: 1px solid #555; font-size: 11px;"
         )
-        help_text.setStyleSheet("color: gray; font-size: 11px;")
+        self.inpaint_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        inpaint_layout.addWidget(self.inpaint_label)
+        
+        # 在inpainting预览下方放操作说明
+        self.inpaint_filename_label = QLabel("")
+        self.inpaint_filename_label.setStyleSheet("color: #aaa; font-size: 10px;")
+        self.inpaint_filename_label.setAlignment(Qt.AlignCenter)
+        inpaint_layout.addWidget(self.inpaint_filename_label)
+        
+        layout.addWidget(inpaint_group)
+        
+        # --- 帮助说明（放在最底部，紧凑） ---
+        help_text = QLabel(
+            "左键:选中/拖拽 Ctrl+点击:瞬移 | 右键:平移 滚轮:缩放\n"
+            "A:遮挡▲ D:不可见✕ S:可见● | Tab/Shift+Tab:切换点\n"
+            "←→:翻页 Ctrl+→:下个需处理 | Ctrl+Z/Y:撤销/重做"
+        )
+        help_text.setStyleSheet("color: #777; font-size: 10px;")
+        help_text.setWordWrap(True)
         layout.addWidget(help_text)
         
-        layout.addStretch()
         return panel
         
     def create_menu_bar(self):
         menubar = self.menuBar()
         file_menu = menubar.addMenu("文件")
         
-        open_action = QAction("打开文件夹", self)
+        open_action = QAction("打开项目文件夹", self)
         open_action.setShortcut("Ctrl+O")
         open_action.triggered.connect(self.open_folder)
         file_menu.addAction(open_action)
@@ -854,13 +919,12 @@ class PoseEditor(QMainWindow):
     def update_keypoint_list(self):
         self.keypoint_list.clear()
         for kp in self.canvas.pose_data.keypoints:
-            # 用形状符号表示可见性：● 圆形=可见，▲ 三角=遮挡，✕ 叉=不可见
             if kp.visibility == 2:
-                prefix = "● "  # 可见
+                prefix = "● "
             elif kp.visibility == 1:
-                prefix = "▲ "  # 遮挡
+                prefix = "▲ "
             else:
-                prefix = "✕ "  # 不可见
+                prefix = "✕ "
             item = QListWidgetItem(prefix + kp.name)
             self.keypoint_list.addItem(item)
             
@@ -868,13 +932,12 @@ class PoseEditor(QMainWindow):
         self.update_status()
         for i in range(self.keypoint_list.count()):
             item_text = self.keypoint_list.item(i).text()
-            # 列表项有形状前缀（如 "● nose"），需要去掉前缀比较
             if item_text[2:] == name:
                 self.keypoint_list.setCurrentRow(i)
                 break
                 
     def on_list_item_clicked(self, item: QListWidgetItem):
-        kp_name = item.text()[2:]  # 去掉形状前缀（如 "● "）
+        kp_name = item.text()[2:]
         for kp in self.canvas.pose_data.keypoints:
             if kp.name == kp_name:
                 self.canvas.selected_keypoint = kp
@@ -892,18 +955,220 @@ class PoseEditor(QMainWindow):
         """已废弃 - 由 move_to_ignore_category 替代"""
         pass
 
+    # ============================================================
+    # 项目文件夹管理
+    # ============================================================
+    
+    def open_folder(self):
+        """打开项目根目录，自动识别或创建子目录结构"""
+        folder = QFileDialog.getExistingDirectory(self, "选择项目根目录")
+        if not folder:
+            return
+        
+        root = Path(folder)
+        origin = root / DIR_ORIGIN
+        json_dir = root / DIR_JSON
+        inpaint = root / DIR_INPAINT
+        
+        # 如果 images/ 子目录不存在，检查根目录是否直接有图片（兼容旧结构）
+        if not origin.exists():
+            # 看看根目录自身有没有图片
+            has_images_at_root = any(
+                root.glob(f"*{ext}") 
+                for ext in ['.jpg', '.jpeg', '.png', '.bmp', '.tiff',
+                            '.JPG', '.JPEG', '.PNG', '.BMP', '.TIFF']
+            )
+            if has_images_at_root:
+                # 旧结构：用户选的根目录本身就是图片目录
+                # 提示用户是否自动迁移
+                reply = QMessageBox.question(
+                    self, "检测到旧文件结构",
+                    f"选择的文件夹中直接包含图片。\n\n"
+                    f"是否自动迁移为新的项目结构？\n"
+                    f"  图片 → {DIR_ORIGIN}/\n"
+                    f"  JSON → {DIR_JSON}/\n\n"
+                    f"选「否」将直接以旧模式打开（图片和JSON在同一目录）。",
+                    QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+                )
+                if reply == QMessageBox.Yes:
+                    self._migrate_to_project_structure(root)
+                else:
+                    # 旧模式兼容：不使用子目录
+                    self.project_root = root
+                    self.origin_dir = root
+                    self.json_dir = root
+                    self.inpaint_dir = root / DIR_INPAINT  # 即使旧模式也尝试读 inpainting
+                    self._load_project()
+                    return
+            else:
+                # 没有图片，创建子目录结构
+                origin.mkdir(parents=True, exist_ok=True)
+                QMessageBox.information(
+                    self, "已创建项目结构",
+                    f"已创建 {DIR_ORIGIN}/ 子目录。\n请将原图放入 {origin} 后重新打开。"
+                )
+                return
+        
+        # 确保所有目录存在
+        json_dir.mkdir(parents=True, exist_ok=True)
+        inpaint.mkdir(parents=True, exist_ok=True)
+        
+        self.project_root = root
+        self.origin_dir = origin
+        self.json_dir = json_dir
+        self.inpaint_dir = inpaint
+        
+        self._load_project()
+    
+    def _migrate_to_project_structure(self, root: Path):
+        """将旧的平铺结构迁移为项目子目录结构"""
+        origin = root / DIR_ORIGIN
+        json_dir = root / DIR_JSON
+        inpaint = root / DIR_INPAINT
+        
+        origin.mkdir(parents=True, exist_ok=True)
+        json_dir.mkdir(parents=True, exist_ok=True)
+        inpaint.mkdir(parents=True, exist_ok=True)
+        
+        image_extensions = {'.jpg', '.jpeg', '.png', '.bmp', '.tiff'}
+        
+        moved_count = 0
+        for f in root.iterdir():
+            if f.is_file():
+                if f.suffix.lower() in image_extensions:
+                    shutil.move(str(f), str(origin / f.name))
+                    moved_count += 1
+                elif f.suffix.lower() == '.json' and f.name != META_FILE:
+                    shutil.move(str(f), str(json_dir / f.name))
+        
+        self.project_root = root
+        self.origin_dir = origin
+        self.json_dir = json_dir
+        self.inpaint_dir = inpaint
+        
+        QMessageBox.information(self, "迁移完成", f"已迁移 {moved_count} 个图片文件到 {DIR_ORIGIN}/")
+        self._load_project()
+    
+    def _load_project(self):
+        """加载项目：扫描图片、更新meta、刷新UI"""
+        # 更新 meta.json
+        self._update_meta()
+        
+        # 扫描图片
+        self.load_images_from_folder(str(self.origin_dir))
+        
+        # 更新项目路径显示
+        if self.project_root:
+            self.project_path_label.setText(f"📁 {self.project_root}")
+            self.setWindowTitle(f"姿态标注修正工具 v2.1 — {self.project_root.name}")
+    
+    def _update_meta(self):
+        """更新 meta.json（记录打开时间等协作信息）"""
+        if not self.project_root:
+            return
+        
+        meta_path = self.project_root / META_FILE
+        meta = {}
+        
+        # 读取已有的 meta
+        if meta_path.exists():
+            try:
+                with open(meta_path, 'r', encoding='utf-8') as f:
+                    meta = json.load(f)
+            except Exception:
+                meta = {}
+        
+        # 更新字段
+        import getpass
+        username = getpass.getuser()
+        now = datetime.now().isoformat(timespec='seconds')
+        
+        meta["last_opened"] = now
+        meta["last_opened_by"] = username
+        
+        # 维护打开历史
+        history = meta.get("open_history", [])
+        history.append({"time": now, "user": username})
+        # 只保留最近50条
+        meta["open_history"] = history[-50:]
+        
+        # 统计图片数量
+        if self.origin_dir and self.origin_dir.exists():
+            image_extensions = {'.jpg', '.jpeg', '.png', '.bmp', '.tiff'}
+            count = sum(1 for f in self.origin_dir.iterdir() 
+                       if f.is_file() and f.suffix.lower() in image_extensions)
+            meta["total_images"] = count
+        
+        try:
+            with open(meta_path, 'w', encoding='utf-8') as f:
+                json.dump(meta, f, indent=2, ensure_ascii=False)
+        except Exception as e:
+            print(f"Warning: failed to write meta.json: {e}")
+
+    def _find_inpainting_image(self, image_name_stem: str) -> Optional[Path]:
+        """在 inpainting/ 目录中查找同名（不同后缀也可以）的参考图"""
+        if not self.inpaint_dir or not self.inpaint_dir.exists():
+            return None
+        
+        image_extensions = ['.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.webp',
+                           '.JPG', '.JPEG', '.PNG', '.BMP', '.TIFF', '.WEBP']
+        
+        for ext in image_extensions:
+            candidate = self.inpaint_dir / (image_name_stem + ext)
+            if candidate.exists():
+                return candidate
+        return None
+    
+    def _update_inpainting_preview(self):
+        """更新右下角的 inpainting 参考图预览"""
+        if not self.current_image_path:
+            self.inpaint_label.setText("无图片")
+            self.inpaint_filename_label.setText("")
+            return
+        
+        stem = Path(self.current_image_path).stem
+        inpaint_path = self._find_inpainting_image(stem)
+        
+        if inpaint_path:
+            pixmap = QPixmap(str(inpaint_path))
+            if not pixmap.isNull():
+                # 缩放以适应预览区域
+                scaled = pixmap.scaled(
+                    self.inpaint_label.width() - 4, 
+                    self.inpaint_label.maximumHeight() - 4,
+                    Qt.KeepAspectRatio, Qt.SmoothTransformation
+                )
+                self.inpaint_label.setPixmap(scaled)
+                self.inpaint_filename_label.setText(f"📎 {inpaint_path.name}")
+            else:
+                self.inpaint_label.setText("(加载失败)")
+                self.inpaint_filename_label.setText(str(inpaint_path.name))
+        else:
+            self.inpaint_label.setText("无对应 inpainting 图")
+            self.inpaint_label.setPixmap(QPixmap())  # 清除之前的图
+            self.inpaint_filename_label.setText("")
+
+    # ============================================================
+    # ignore 相关
+    # ============================================================
+
     def move_to_ignore_category(self, category: str, custom_reason: str = ""):
         """将当前图片和JSON移动到 ignore/<category>/ 文件夹"""
         if not self.current_image_path:
             return
 
         image_path = Path(self.current_image_path)
-        json_path = image_path.with_suffix('.json')
         
-        # 创建 ignore/<category>/ 文件夹
-        # 对"其他"类别使用固定文件夹名
+        # JSON 路径：优先用项目结构
+        if self.json_dir and self.json_dir != self.origin_dir:
+            json_path = self.json_dir / (image_path.stem + '.json')
+        else:
+            json_path = image_path.with_suffix('.json')
+        
+        # 创建 ignore/<category>/ 文件夹（在 origin 目录旁边）
         folder_name = category
-        ignore_dir = image_path.parent / "ignore" / folder_name
+        base_dir = self.project_root if self.project_root else image_path.parent
+        ignore_dir = base_dir / "ignore" / folder_name
         if not ignore_dir.exists():
             ignore_dir.mkdir(parents=True)
             
@@ -914,6 +1179,8 @@ class PoseEditor(QMainWindow):
             
             # 保存 JSON（确保理由写入）
             data = self.canvas.pose_data.to_dict()
+            # 确保JSON目录存在
+            json_path.parent.mkdir(parents=True, exist_ok=True)
             with open(json_path, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
             
@@ -929,37 +1196,70 @@ class PoseEditor(QMainWindow):
             # 从列表中移除
             del self.image_files[self.current_index]
             
-            # 如果列表空了
             if not self.image_files:
                 self.canvas.image = None
                 self.canvas.update()
                 QMessageBox.information(self, "提示", "所有图片处理完毕")
                 return
 
-            # 修正索引
             if self.current_index >= len(self.image_files):
                 self.current_index = len(self.image_files) - 1
                 
-            # 加载下一张
             self.load_current_image()
             
         except Exception as e:
             QMessageBox.critical(self, "错误", f"移动文件失败: {e}")
 
-    def move_to_ignore_other(self):
-        """点击'其他原因'时弹出输入框，输入理由后移动"""
+    def move_to_ignore(self):
+        """[Delete键] 弹出选择对话框"""
         if not self.current_image_path:
             return
-        
+        items = ["美感不足", "图像模糊", "比例失调", "场景图失真", "其他原因"]
+        item, ok = QInputDialog.getItem(self, "选择ignore类别", "请选择跳过原因:", items, 0, False)
+        if ok and item:
+            if item == "其他原因":
+                self.move_to_ignore_other()
+            else:
+                self.move_to_ignore_category(item)
+
+    def move_to_ignore_other(self):
+        """点击'其他原因'时弹出输入框"""
+        if not self.current_image_path:
+            return
         reason, ok = QInputDialog.getText(self, "其他原因", "请输入跳过理由:")
         if ok and reason.strip():
             self.move_to_ignore_category("其他", custom_reason=reason.strip())
-        # 如果取消或空字符串则不执行
 
     def update_skip_buttons(self):
-        """跳过按钮不再是toggle模式，此方法保留兼容"""
         pass
+
+    # ============================================================
+    # 评分验证 & 导航
+    # ============================================================
         
+    def has_complete_scores(self) -> bool:
+        pose = self.canvas.pose_data
+        return (pose.novelty >= 0 and 
+                pose.environment_interaction >= 0 and 
+                pose.person_fit >= 0)
+    
+    def validate_before_navigate(self) -> bool:
+        pose = self.canvas.pose_data
+        if pose.skip_reason:
+            return True
+        if not self.has_complete_scores():
+            missing = []
+            if pose.novelty < 0:
+                missing.append("姿势新奇度")
+            if pose.environment_interaction < 0:
+                missing.append("环境互动性")
+            if pose.person_fit < 0:
+                missing.append("人物契合度")
+            QMessageBox.warning(self, "评分不完整", 
+                f"以下评分仍为N/A，请先打分或移至Ignore：\n\n• {'、'.join(missing)}")
+            return False
+        return True
+
     def update_status(self):
         if self.current_image_path:
             filename = Path(self.current_image_path).name
@@ -967,7 +1267,6 @@ class PoseEditor(QMainWindow):
         else:
             status = "未加载图片"
             
-        # 显示跳过状态
         if self.canvas.pose_data.skip_reason:
             status += f" | [已跳过: {self.canvas.pose_data.skip_reason}]"
         
@@ -977,11 +1276,6 @@ class PoseEditor(QMainWindow):
             status += f" | 选中: {kp.name} ({vis_map[kp.visibility]})"
             
         self.status_bar.showMessage(status)
-        
-    def open_folder(self):
-        folder = QFileDialog.getExistingDirectory(self, "选择图片文件夹")
-        if folder:
-            self.load_images_from_folder(folder)
             
     def load_images_from_folder(self, folder: str):
         folder_path = Path(folder)
@@ -997,7 +1291,7 @@ class PoseEditor(QMainWindow):
             self.current_index = 0
             self.load_current_image()
         else:
-            QMessageBox.information(self, "提示", "该文件夹下没有图片")
+            QMessageBox.information(self, "提示", f"{folder_path} 下没有图片")
             
     def load_current_image(self):
         if not self.image_files: return
@@ -1016,11 +1310,23 @@ class PoseEditor(QMainWindow):
         self.update_status()
         self.update_keypoint_list()
         
+        # 更新 inpainting 预览
+        self._update_inpainting_preview()
+        
     def load_annotation(self):
         if not self.current_image_path: return
         
         image_path = Path(self.current_image_path)
-        json_path = image_path.with_suffix('.json')
+        
+        # JSON路径：优先从 annotations/ 目录加载
+        if self.json_dir and self.json_dir != self.origin_dir:
+            json_path = self.json_dir / (image_path.stem + '.json')
+            # 也检查旧的同目录位置（兼容）
+            old_json_path = image_path.with_suffix('.json')
+            if not json_path.exists() and old_json_path.exists():
+                json_path = old_json_path
+        else:
+            json_path = image_path.with_suffix('.json')
         
         pose_data = PoseData()
         
@@ -1028,7 +1334,6 @@ class PoseEditor(QMainWindow):
             try:
                 with open(json_path, 'r', encoding='utf-8') as f:
                     data = json.load(f)
-                    # 处理最外层是列表的情况（COCO风格）
                     if isinstance(data, list):
                         if len(data) > 0:
                             pose_data = PoseData.from_dict(data[0])
@@ -1040,98 +1345,52 @@ class PoseEditor(QMainWindow):
         self.canvas.set_pose_data(pose_data)
         self.current_annotation_path = str(json_path)
         
-        # 更新新版评分UI
+        # 更新评分UI
         self.update_score_ui(pose_data)
-        
-        # 更新跳过按钮状态
         self.update_skip_buttons()
 
         if self.canvas.pose_data.keypoints:
-            # 默认选中第一个点
             first_kp = self.canvas.pose_data.keypoints[0]
             self.canvas.selected_keypoint = first_kp
             self.on_keypoint_selected(first_kp.name)
 
-        # [新增功能 1] 自动缩放逻辑
         if pose_data.has_valid_keypoints():
-            # 如果有有效数据，聚焦于人体
             self.canvas.focus_on_pose()
         else:
-            # 如果是新数据或全0数据，全屏显示
             self.canvas.fit_to_window()
     
     def update_score_ui(self, pose_data: PoseData):
-        """更新评分UI状态"""
-        # 更新姿势新奇度
         novelty = pose_data.novelty
         if novelty >= 0 and novelty in self.novelty_buttons:
             self.novelty_buttons[novelty].setChecked(True)
         else:
-            self.novelty_buttons[-1].setChecked(True)  # N/A按钮
+            self.novelty_buttons[-1].setChecked(True)
         
-        # 更新环境互动性
         env_int = pose_data.environment_interaction
         if env_int >= 0 and env_int in self.env_buttons:
             self.env_buttons[env_int].setChecked(True)
         else:
-            self.env_buttons[-1].setChecked(True)  # N/A按钮
+            self.env_buttons[-1].setChecked(True)
         
-        # 更新人物契合度
         person_fit = pose_data.person_fit
         if person_fit >= 0 and person_fit in self.person_buttons:
             self.person_buttons[person_fit].setChecked(True)
         else:
-            self.person_buttons[-1].setChecked(True)  # N/A按钮
+            self.person_buttons[-1].setChecked(True)
         
     def save_current(self):
         if not self.current_annotation_path: return
         try:
-            data = [self.canvas.pose_data.to_dict()]  # 用列表包裹，保持COCO风格
+            # 确保目录存在
+            ann_path = Path(self.current_annotation_path)
+            ann_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            data = [self.canvas.pose_data.to_dict()]
             with open(self.current_annotation_path, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
-            self.status_bar.showMessage(f"已保存: {Path(self.current_annotation_path).name}", 2000)
+            self.status_bar.showMessage(f"已保存: {ann_path.name}", 2000)
         except Exception as e:
             QMessageBox.warning(self, "错误", f"保存失败: {e}")
-
-    def move_to_ignore(self):
-        """[Delete键] 弹出选择对话框，选择类别后移动到 ignore 子文件夹"""
-        if not self.current_image_path:
-            return
-        
-        items = ["美感不足", "图像模糊", "比例失调", "场景图失真", "其他原因"]
-        item, ok = QInputDialog.getItem(self, "选择ignore类别", "请选择跳过原因:", items, 0, False)
-        if ok and item:
-            if item == "其他原因":
-                self.move_to_ignore_other()
-            else:
-                self.move_to_ignore_category(item)
-
-    def has_complete_scores(self) -> bool:
-        """检查是否所有评分都已填写（非N/A）"""
-        pose = self.canvas.pose_data
-        return (pose.novelty >= 0 and 
-                pose.environment_interaction >= 0 and 
-                pose.person_fit >= 0)
-    
-    def validate_before_navigate(self) -> bool:
-        """导航前验证：评分不完整则阻止翻页"""
-        pose = self.canvas.pose_data
-        # 如果已有skip_reason（从旧数据加载的），允许翻页
-        if pose.skip_reason:
-            return True
-        # 必须所有评分都已填写
-        if not self.has_complete_scores():
-            missing = []
-            if pose.novelty < 0:
-                missing.append("姿势新奇度")
-            if pose.environment_interaction < 0:
-                missing.append("环境互动性")
-            if pose.person_fit < 0:
-                missing.append("人物契合度")
-            QMessageBox.warning(self, "评分不完整", 
-                f"以下评分仍为N/A，请先打分或移至Ignore：\n\n• {'、'.join(missing)}")
-            return False
-        return True
 
     def prev_image(self):
         if self.image_files and self.current_index > 0:
@@ -1151,27 +1410,20 @@ class PoseEditor(QMainWindow):
         """跳到下一个需要处理的图片（未跳过的图片）"""
         if not self.image_files:
             return
-        
         if not self.validate_before_navigate():
             return
-            
         original_index = self.current_index
         self.save_current()
-        
-        # 向前查找下一个未跳过的图片
         while self.current_index < len(self.image_files) - 1:
             self.current_index += 1
             self.load_current_image()
             if self.should_process_image():
                 return
-                
-        # 如果没找到，回到原始位置
         self.current_index = original_index
         self.load_current_image()
         QMessageBox.information(self, "提示", "没有更多需要处理的图片")
             
     def should_process_image(self) -> bool:
-        """判断是否应该处理当前图片（不跳过）"""
         return not self.canvas.pose_data.skip_reason
             
     def fit_to_window(self):
@@ -1207,7 +1459,9 @@ class PoseEditor(QMainWindow):
             self.switch_keypoint(-1)
         elif key == Qt.Key_S and event.modifiers() & Qt.ControlModifier:
             self.save_current()
-        elif key == Qt.Key_Delete: # Delete 键触发移动到 ignore
+        elif key == Qt.Key_H:
+            self.toggle_skeleton()
+        elif key == Qt.Key_Delete:
             self.move_to_ignore()
         else:
             self.canvas.keyPressEvent(event)
