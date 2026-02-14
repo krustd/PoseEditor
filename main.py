@@ -569,9 +569,10 @@ class Canvas(QWidget):
         keypoint_index = self.pose_data.keypoints.index(self.selected_keypoint)
         old_state = self.selected_keypoint.copy()
         
-        if key in [Qt.Key_A, Qt.Key_S]:
-            if key == Qt.Key_A: self.selected_keypoint.visibility = 0
-            elif key == Qt.Key_S: self.selected_keypoint.visibility = 1
+        if key in [Qt.Key_S, Qt.Key_D, Qt.Key_Space]:
+            if key == Qt.Key_S: self.selected_keypoint.visibility = 0
+            elif key == Qt.Key_D: self.selected_keypoint.visibility = 1
+            elif key == Qt.Key_Space: self.selected_keypoint.visibility = 1 - self.selected_keypoint.visibility
             
             new_state = self.selected_keypoint.copy()
             command = KeypointChangeCommand(self.pose_data, keypoint_index, old_state, new_state)
@@ -771,7 +772,7 @@ class PoseEditor(QMainWindow):
         detail_layout.setSpacing(3)
         
         # 姿势新奇度
-        detail_layout.addWidget(QLabel("新奇度:"), 0, 0)
+        detail_layout.addWidget(QLabel("姿势新奇度:"), 0, 0)
         self.novelty_buttons = {}
         self.novelty_btn_group = QButtonGroup(self)
         self.novelty_btn_group.setExclusive(False)
@@ -791,7 +792,7 @@ class PoseEditor(QMainWindow):
             self.novelty_buttons[i] = btn
         
         # 环境互动性
-        detail_layout.addWidget(QLabel("互动性:"), 1, 0)
+        detail_layout.addWidget(QLabel("环境互动性:"), 1, 0)
         self.env_buttons = {}
         self.env_btn_group = QButtonGroup(self)
         self.env_btn_group.setExclusive(False)
@@ -811,7 +812,7 @@ class PoseEditor(QMainWindow):
             self.env_buttons[i] = btn
         
         # 人物契合度
-        detail_layout.addWidget(QLabel("契合度:"), 2, 0)
+        detail_layout.addWidget(QLabel("人物契合度:"), 2, 0)
         self.person_buttons = {}
         self.person_btn_group = QButtonGroup(self)
         self.person_btn_group.setExclusive(False)
@@ -865,7 +866,7 @@ class PoseEditor(QMainWindow):
         # --- 帮助说明（放在最底部，紧凑） ---
         help_text = QLabel(
             "左键:选中/拖拽 Ctrl+点击:瞬移 | 右键:平移 滚轮:缩放\n"
-            "A:遮挡✕ S:可见● | Tab/Shift+Tab:切换点\n"
+            "S:遮挡✕ D:可见● 空格:切换 | Tab/Shift+Tab:切换点\n"
             "←→:翻页 O:下个需处理 | W:聚焦关键点 E:适应全图\n"
             "H:骨架 1~5:丢弃 Del:选择丢弃 | Ctrl+Z/Y:撤销/重做"
         )
@@ -1545,9 +1546,10 @@ class PoseEditor(QMainWindow):
         QShortcut(QKeySequence(Qt.Key_3), self, lambda: self.move_to_ignore_category("背景失真"))
         QShortcut(QKeySequence(Qt.Key_4), self, lambda: self.move_to_ignore_category("比例失调"))
         QShortcut(QKeySequence(Qt.Key_5), self, lambda: self.move_to_ignore_category("图像模糊"))
-        # A/S 用于切换可见性，需要转发给 canvas
-        QShortcut(QKeySequence(Qt.Key_A), self, lambda: self.canvas.keyPressEvent(QKeyEvent(QEvent.KeyPress, Qt.Key_A, Qt.NoModifier)))
+        # S/D/空格 用于切换可见性，需要转发给 canvas
         QShortcut(QKeySequence(Qt.Key_S), self, lambda: self.canvas.keyPressEvent(QKeyEvent(QEvent.KeyPress, Qt.Key_S, Qt.NoModifier)))
+        QShortcut(QKeySequence(Qt.Key_D), self, lambda: self.canvas.keyPressEvent(QKeyEvent(QEvent.KeyPress, Qt.Key_D, Qt.NoModifier)))
+        QShortcut(QKeySequence(Qt.Key_Space), self, lambda: self.canvas.keyPressEvent(QKeyEvent(QEvent.KeyPress, Qt.Key_Space, Qt.NoModifier)))
             
     def switch_keypoint(self, direction: int):
         if not self.canvas.pose_data.keypoints: return
