@@ -106,7 +106,7 @@ your_project/
 - **H**：显示/隐藏骨架
 - **O**：跳到下一个需要处理的图片
 - **Delete**：选择跳过当前图片
-- **Ctrl+1~5**：快速跳过（对应不同原因）
+- **1~5**：快速跳过（对应不同原因）
 - **Ctrl+Z/Y**：撤销/重做操作
 
 ### 工作流程
@@ -229,7 +229,7 @@ pyinstaller main.py --name=PoseEditor --onefile --windowed --clean --collect-all
 
 - 项目主页：https://github.com/krustd/PoseEditor
 - 问题反馈：https://github.com/krustd/PoseEditor/issues
-- 邮箱：[your-email@example.com]
+- 邮箱：[krust@foxmail.com]
 
 ---
 

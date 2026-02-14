@@ -1494,12 +1494,12 @@ class PoseEditor(QMainWindow):
         QShortcut(QKeySequence(Qt.Key_Delete), self, self.move_to_ignore)
         QShortcut(QKeySequence(Qt.Key_W), self, self.focus_on_pose)
         QShortcut(QKeySequence(Qt.Key_E), self, self.fit_to_window)
-        # Ctrl+1/2/3/4/5 对应五个丢弃理由
-        QShortcut(QKeySequence("Ctrl+1"), self, lambda: self.move_to_ignore_category("美感不足"))
-        QShortcut(QKeySequence("Ctrl+2"), self, lambda: self.move_to_ignore_category("难以补全"))
-        QShortcut(QKeySequence("Ctrl+3"), self, lambda: self.move_to_ignore_category("背景失真"))
-        QShortcut(QKeySequence("Ctrl+4"), self, lambda: self.move_to_ignore_category("比例失调"))
-        QShortcut(QKeySequence("Ctrl+5"), self, lambda: self.move_to_ignore_category("图像模糊"))
+        # 1/2/3/4/5 对应五个丢弃理由
+        QShortcut(QKeySequence(Qt.Key_1), self, lambda: self.move_to_ignore_category("美感不足"))
+        QShortcut(QKeySequence(Qt.Key_2), self, lambda: self.move_to_ignore_category("难以补全"))
+        QShortcut(QKeySequence(Qt.Key_3), self, lambda: self.move_to_ignore_category("背景失真"))
+        QShortcut(QKeySequence(Qt.Key_4), self, lambda: self.move_to_ignore_category("比例失调"))
+        QShortcut(QKeySequence(Qt.Key_5), self, lambda: self.move_to_ignore_category("图像模糊"))
         # A/S 用于切换可见性，需要转发给 canvas
         QShortcut(QKeySequence(Qt.Key_A), self, lambda: self.canvas.keyPressEvent(QKeyEvent(QEvent.KeyPress, Qt.Key_A, Qt.NoModifier)))
         QShortcut(QKeySequence(Qt.Key_S), self, lambda: self.canvas.keyPressEvent(QKeyEvent(QEvent.KeyPress, Qt.Key_S, Qt.NoModifier)))
