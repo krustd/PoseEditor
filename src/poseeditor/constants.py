@@ -4,7 +4,7 @@ DIR_ORIGIN = "images"  # 原图
 DIR_JSON = "annotations"  # 标注JSON
 DIR_INPAINT = "inpainting"  # inpainting参考图
 META_FILE = "meta.json"  # 项目元数据
-APP_VERSION = "3.0.5"
+APP_VERSION = "4.0.0"
 
 # 主图扫描支持的扩展名。
 IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".bmp", ".tiff")

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "poseeditor"
-version = "3.0.5"
+version = "4.0.0"
 description = "krust and mcb's workout"
 readme = "README.md"
 requires-python = ">=3.9,<3.10"

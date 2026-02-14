@@ -1,7 +1,9 @@
 # PoseEditor - 姿态标注修正工具
 
 [![Build Status](https://github.com/krustd/PoseEditor/workflows/Build%20and%20Release/badge.svg)](https://github.com/krustd/PoseEditor/actions)
+[![Build Status (MCB)](https://github.com/MCB-SMART-BOY/PoseEditor/workflows/Build%20and%20Release/badge.svg)](https://github.com/MCB-SMART-BOY/PoseEditor/actions)
 [![Release](https://img.shields.io/github/release/krustd/PoseEditor.svg)](https://github.com/krustd/PoseEditor/releases)
+[![Release (MCB)](https://img.shields.io/github/release/MCB-SMART-BOY/PoseEditor.svg)](https://github.com/MCB-SMART-BOY/PoseEditor/releases)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 一个基于 PySide6 的人体姿态标注修正工具，面向计算机视觉与机器学习数据清洗流程。支持 **COCO 风格 JSON** 标注读取与编辑，提供关键点拖拽、可见性切换、评分、Ignore 分类、inpainting 参考图联动等能力。
@@ -17,8 +19,8 @@
 - 原作者发布页：`https://github.com/krustd/PoseEditor/releases`
 - 当前维护分支发布页：`https://github.com/MCB-SMART-BOY/PoseEditor/releases`
 - Windows: `PoseEditor-windows.exe`
-- macOS: `PoseEditor-macos.zip`
-- Linux: `PoseEditor-linux.tar.gz`
+- macOS: `PoseEditor-macos.app.zip`
+- Linux: `PoseEditor-linux.AppImage`
 
 ### 方式 2：从源码运行
 ```bash
@@ -187,6 +189,15 @@ uv run pyinstaller src/poseeditor/__main__.py \
   --clean \
   --collect-all pyside6
 ```
+
+### GitHub Actions 跨平台构建与发布
+- 触发方式：
+  - 推送标签：`v*`（例如 `v4.0.0`）
+  - 手动触发：`workflow_dispatch` + `release_tag`
+- 发布产物：
+  - Windows：`PoseEditor-windows.exe`
+  - macOS：`PoseEditor-macos.app.zip`
+  - Linux：`PoseEditor-linux.AppImage`
 
 ### 锁文件一致性
 ```bash
