@@ -1,6 +1,12 @@
 name: Build and Release
 
 on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Tag to build and release (e.g. v3.0.5)"
+        required: false
+        default: ""
   push:
     tags:
       - "v*"
@@ -24,7 +30,14 @@ jobs:
             target: linux
 
     steps:
+      - name: Checkout code (tag for manual release)
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.release_tag != ''
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.release_tag }}
+
       - name: Checkout code
+        if: github.event_name != 'workflow_dispatch' || github.event.inputs.release_tag == ''
         uses: actions/checkout@v4
 
       - name: Set up Python
@@ -74,6 +87,16 @@ jobs:
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
         with:
+          files: |
+            dist/*.exe
+            dist/*.zip
+            dist/*.tar.gz
+
+      - name: Upload Release Assets (Manual)
+        uses: softprops/action-gh-release@v2
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.release_tag != ''
+        with:
+          tag_name: ${{ github.event.inputs.release_tag }}
           files: |
             dist/*.exe
             dist/*.zip
