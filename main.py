@@ -1179,6 +1179,47 @@ class PoseEditor(QMainWindow):
     # ignore 相关
     # ============================================================
 
+    def _move_corrupt_to_ignore(self):
+        """将当前无法加载的图片（及其JSON）移入 ignore/图片损坏/，然后加载下一张"""
+        image_path = Path(self.current_image_path)
+
+        # 确定 ignore 目标目录
+        base_dir = self.project_root if self.project_root else image_path.parent
+        ignore_dir = base_dir / "ignore" / "图片损坏"
+        ignore_dir.mkdir(parents=True, exist_ok=True)
+
+        try:
+            # 移动图片
+            shutil.move(str(image_path), str(ignore_dir / image_path.name))
+
+            # 移动对应 JSON（如果有）
+            if self.json_dir and self.json_dir != self.origin_dir:
+                json_path = self.json_dir / (image_path.stem + '.json')
+            else:
+                json_path = image_path.with_suffix('.json')
+            if json_path.exists():
+                shutil.move(str(json_path), str(ignore_dir / json_path.name))
+
+        except Exception as e:
+            print(f"Warning: failed to move corrupt image: {e}")
+
+        # 从列表中移除
+        del self.image_files[self.current_index]
+
+        if not self.image_files:
+            self.canvas.image = None
+            self.canvas.pose_data = PoseData()
+            self.canvas.update()
+            self.current_image_path = None
+            self.current_annotation_path = None
+            self.update_status()
+            return
+
+        if self.current_index >= len(self.image_files):
+            self.current_index = len(self.image_files) - 1
+
+        self.load_current_image()
+
     def move_to_ignore_category(self, category: str, custom_reason: str = ""):
         """将当前图片和JSON移动到 ignore/<category>/ 文件夹"""
         if not self.current_image_path:
@@ -1326,7 +1367,11 @@ class PoseEditor(QMainWindow):
         
         image = QImage(self.current_image_path)
         if image.isNull():
-            QMessageBox.warning(self, "错误", f"无法加载图片: {self.current_image_path}")
+            # 加载失败：自动移入 ignore/图片损坏/
+            failed_name = Path(self.current_image_path).name
+            self._move_corrupt_to_ignore()
+            self.status_bar.showMessage(f"⚠ 图片损坏已移除: {failed_name}", 3000)
+            # _move_corrupt_to_ignore 内部会调整索引并递归加载下一张
             return
             
         self.canvas.set_image(image)
