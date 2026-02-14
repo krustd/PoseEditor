@@ -723,31 +723,31 @@ class PoseEditor(QMainWindow):
         """
         
         self.ignore_aesthetic_btn = QPushButton("1.美感不足")
-        self.ignore_aesthetic_btn.setToolTip("Ctrl+1 | 美感不足。如果图像不是具有美感的人物照片（例如日常照片），则可点击该按钮跳过。")
+        self.ignore_aesthetic_btn.setToolTip("1 | 美感不足。如果图像不是具有美感的人物照片（例如日常照片），则可点击该按钮跳过。")
         self.ignore_aesthetic_btn.clicked.connect(lambda: self.move_to_ignore_category("美感不足"))
         self.ignore_aesthetic_btn.setStyleSheet(ignore_btn_style)
         skip_layout_top.addWidget(self.ignore_aesthetic_btn)
         
         self.ignore_incomplete_btn = QPushButton("2.难以补全")
-        self.ignore_incomplete_btn.setToolTip("Ctrl+2 | 难以补全。如果图像中的人物下半身都在画面外，难以拖拽画面外的遮挡点到猜测位置，则点它跳过。")
+        self.ignore_incomplete_btn.setToolTip("2 | 难以补全。如果图像中的人物下半身都在画面外，难以拖拽画面外的遮挡点到猜测位置，则点它跳过。")
         self.ignore_incomplete_btn.clicked.connect(lambda: self.move_to_ignore_category("难以补全"))
         self.ignore_incomplete_btn.setStyleSheet(ignore_btn_style)
         skip_layout_top.addWidget(self.ignore_incomplete_btn)
         
         self.ignore_scene_btn = QPushButton("3.背景失真")
-        self.ignore_scene_btn.setToolTip("Ctrl+3 | 背景失真。这里的图像是将人物图像中的人物区域给删除修复得到的无人场景图。如果该图像有异常纹理等不真实的情况，则点它跳过。")
+        self.ignore_scene_btn.setToolTip("3 | 背景失真。这里的图像是将人物图像中的人物区域给删除修复得到的无人场景图。如果该图像有异常纹理等不真实的情况，则点它跳过。")
         self.ignore_scene_btn.clicked.connect(lambda: self.move_to_ignore_category("背景失真"))
         self.ignore_scene_btn.setStyleSheet(ignore_btn_style)
         skip_layout_top.addWidget(self.ignore_scene_btn)
         
         self.ignore_size_btn = QPushButton("4.比例失调")
-        self.ignore_size_btn.setToolTip("Ctrl+4 | 比例失调。如果人物占画面的比例非常小或大，无法确定姿态，则点它跳过。")
+        self.ignore_size_btn.setToolTip("4 | 比例失调。如果人物占画面的比例非常小或大，无法确定姿态，则点它跳过。")
         self.ignore_size_btn.clicked.connect(lambda: self.move_to_ignore_category("比例失调"))
         self.ignore_size_btn.setStyleSheet(ignore_btn_style)
         skip_layout_bottom.addWidget(self.ignore_size_btn)
         
         self.ignore_blur_btn = QPushButton("5.图像模糊")
-        self.ignore_blur_btn.setToolTip("Ctrl+5 | 图像模糊。如果图像分辨率很低，或图像质量不佳，则可点它跳过。")
+        self.ignore_blur_btn.setToolTip("5 | 图像模糊。如果图像分辨率很低，或图像质量不佳，则可点它跳过。")
         self.ignore_blur_btn.clicked.connect(lambda: self.move_to_ignore_category("图像模糊"))
         self.ignore_blur_btn.setStyleSheet(ignore_btn_style)
         skip_layout_bottom.addWidget(self.ignore_blur_btn)
@@ -867,7 +867,7 @@ class PoseEditor(QMainWindow):
             "左键:选中/拖拽 Ctrl+点击:瞬移 | 右键:平移 滚轮:缩放\n"
             "A:遮挡✕ S:可见● | Tab/Shift+Tab:切换点\n"
             "←→:翻页 O:下个需处理 | W:聚焦关键点 E:适应全图\n"
-            "H:骨架 Ctrl+1~5:丢弃 Del:选择丢弃 | Ctrl+Z/Y:撤销/重做"
+            "H:骨架 1~5:丢弃 Del:选择丢弃 | Ctrl+Z/Y:撤销/重做"
         )
         help_text.setStyleSheet("color: #777; font-size: 10px;")
         help_text.setWordWrap(True)
