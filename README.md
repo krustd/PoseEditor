@@ -1,258 +1,236 @@
-# 姿态标注修正工具 v2.0
+# PoseEditor - 姿态标注修正工具
 
-这是一个用于人体姿态关键点标注和修正的图形化工具，支持17个人体关键点的编辑、可见性设置、美学评分和语音输入功能。
+[![Build Status](https://github.com/krustd/PoseEditor/workflows/Build%20and%20Release/badge.svg)](https://github.com/krustd/PoseEditor/actions)
+[![Release](https://img.shields.io/github/release/krustd/PoseEditor.svg)](https://github.com/krustd/PoseEditor/releases)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-## 功能概述
+## 🚀 即开即用 - 无需Python环境！
 
-- **关键点编辑**：支持17个人体关键点的拖拽修正
-- **可见性设置**：支持三种可见性状态（可见、遮挡、不可见）
-- **美学评分**：0-10分的姿态美学评分系统
-- **语音输入**：支持语音转文字功能，用于图像描述输入
-- **批量处理**：支持文件夹批量加载和切换
-- **撤销/重做**：完整的操作历史管理
-- **智能缩放**：自动聚焦姿态区域或适应窗口
+**直接下载可执行文件即可运行：** [📥 下载页面](https://github.com/krustd/PoseEditor/releases)
 
-"布局界面，左侧显示图片和关键点，右侧为控制面板*
+一个基于PySide6开发的人体姿态标注修正工具，专为计算机视觉和机器学习项目设计。支持COCO格式的姿态数据标注、修正和评分，提供直观的图形界面和高效的工作流程。
 
-## 快速开始 (下载 .exe)
+## 🌟 主要功能
 
-1. 前往 [Releases 页面](https://github.com/krustd/PoseEditor/releases) 下载最新版本的 `poseeditor-windows.exe`。
-2. **重要：** 确保你的电脑已安装 FFmpeg 并配置了环境变量（参考下方 FFmpeg 安装指南）。
-3. 双击运行即可，无需安装 Python 环境。
+### 📝 姿态标注与修正
+- **17个关键点标注**：支持COCO风格的人体关键点标注
+- **可视化编辑**：直观的拖拽操作调整关键点位置
+- **骨架显示**：彩色骨架连接线，清晰展示人体结构
+- **可见性标记**：支持标记关键点的可见/遮挡状态
 
-## 源码开发 (Development)
+### 🎯 智能评分系统
+- **多维度评分**：
+  - 姿势新奇度 (0-5分)
+  - 环境互动性 (0-5分)
+  - 人物契合度 (0-5分)
+- **批量处理**：快速跳转到下一个未评分图片
 
-## 安装与运行
+### 🗂️ 项目管理
+- **结构化项目**：自动创建标准项目目录结构
+- **协作支持**：记录打开历史和处理进度
+- **Ignore分类**：支持按原因分类跳过不合适的图片
 
-1. **确保已安装Python 3.9或更高版本**
-2. **必须安装FFmpeg**（语音识别功能的必要依赖）：
-   - **Windows:**
-     * **方法 1 (推荐):** 下载 [Release 构建包 (gyan.dev)](https://www.gyan.dev/ffmpeg/builds/)，解压后将 `bin` 文件夹的路径添加到系统环境变量 Path 中。
-     * **方法 2 (如果你装了 Scoop):** 在 PowerShell 运行 `scoop install ffmpeg`
-     * **方法 3 (如果你装了 Choco):** 在 PowerShell 运行 `choco install ffmpeg`
-   - macOS: `brew install ffmpeg`
-   - Linux (Ubuntu/Debian): `sudo apt-get install ffmpeg`
-   - 验证安装: 在命令行运行 `ffmpeg -version`
-3. 安装Python依赖：`pip install -r requirements.txt` 或 `uv sync`（如果使用uv）
-4. 运行程序：`python main.py`
+### 🖼️ Inpainting支持
+- **参考图预览**：自动加载并显示对应的inpainting参考图
+- **工作区整合**：无缝集成inpainting工作流程
 
-### 依赖项
+## 🚀 快速开始
 
-- PySide6：图形界面框架
-- OpenAI Whisper：语音识别模型（需要系统安装FFmpeg）
-- PyAudio：音频录制（可能需要系统级依赖）
-- NumPy：数值计算
+### 环境要求
+- Python 3.9
+- PySide6 6.10.1+
+- 支持操作系统：Windows、macOS、Linux
 
-### PyAudio 跨平台安装指南
+### 安装方法
 
-PyAudio 在不同平台上可能需要额外的系统级依赖：
+#### 🚀 推荐方法：直接下载可执行文件
+**无需安装Python环境，直接运行！**
 
-#### Windows
-- 通常可以直接安装：`pip install pyaudio`
-- 如果失败，尝试使用预编译的wheel包：`pip pip install pipwin` 然后 `pipwin install pyaudio`
+从 [Releases页面](https://github.com/krustd/PoseEditor/releases) 下载适合您系统的可执行文件：
+- Windows: `PoseEditor-windows.exe`
+- macOS: `PoseEditor-macos.zip`
+- Linux: `PoseEditor-linux.tar.gz`
 
-#### macOS
-- 使用Homebrew安装PortAudio：`brew install portaudio`
-- 然后安装PyAudio：`pip install pyaudio`
+下载后直接运行即可开始使用，这是最简单快捷的方式！
 
-#### Linux (Ubuntu/Debian)
-- 安装PortAudio开发库：`sudo apt-get install portaudio19-dev python3-pyaudio`
-- 或使用pip安装：`pip install pyaudio`
+#### 方法2：从源码安装
+如果您需要修改源码或开发，可以从源码安装：
+```bash
+# 克隆仓库
+git clone https://github.com/krustd/PoseEditor.git
+cd PoseEditor
 
-#### Linux (CentOS/RHEL/Fedora)
-- 安装必要的开发包：`sudo yum install portaudio-devel` 或 `sudo dnf install portaudio-devel`
-- 然后安装PyAudio：`pip install pyaudio`
+# 安装依赖
+pip install -r requirements.txt
 
-如果安装过程中遇到错误，请确保系统已安装C编译器和Python开发包。
+# 运行程序
+python main.py
+```
 
-## 界面布局
+#### 方法3：使用pip安装
+```bash
+pip install poseeditor
+```
 
-工具采用"左图右控"的布局设计：
+## 📖 使用指南
 
-- **左侧主画布**：显示图片和姿态关键点
-- **右侧控制面板**：包含文件操作、评分、关键点列表和视图控制
-
-## 操作指南
+### 项目结构
+打开或创建项目后，工具会自动创建以下目录结构：
+```
+your_project/
+├── images/          # 原始图片
+├── annotations/     # 标注JSON文件
+├── inpainting/      # Inpainting参考图
+├── ignore/          # 跳过的图片（按原因分类）
+│   ├── 美感不足/
+│   ├── 难以补全/
+│   ├── 背景失真/
+│   ├── 比例失调/
+│   └── 图像模糊/
+└── meta.json        # 项目元数据
+```
 
 ### 基本操作
 
-#### 关键点编辑
-- **选择关键点**：鼠标左键点击关键点
-- **拖拽移动**：按住左键拖动关键点到新位置
-- **瞬移功能**：按住Ctrl键点击目标位置，关键点将直接移动到该位置
+#### 鼠标操作
+- **左键**：选择/拖拽关键点
+- **Ctrl+左键**：瞬移关键点到指定位置
+- **右键**：平移画布
+- **滚轮**：缩放视图
 
-#### 可见性设置
-- **可见 (v=2)**：关键点在画面内且清晰可见（绿色显示）
-- **遮挡 (v=1)**：关键点被遮挡但位置可猜测（橙色显示）
-- **不可见 (v=0)**：关键点在画面外或不存在（红色显示）
+#### 键盘快捷键
+- **←/→**：上一张/下一张图片
+- **Tab/Shift+Tab**：切换关键点选择
+- **A/S**：标记关键点为遮挡/可见
+- **W/E**：聚焦关键点/适应全图
+- **H**：显示/隐藏骨架
+- **O**：跳到下一个需要处理的图片
+- **Delete**：选择跳过当前图片
+- **Ctrl+1~5**：快速跳过（对应不同原因）
+- **Ctrl+Z/Y**：撤销/重做操作
 
-快捷键：
-- **A键**：标记为遮挡
-- **D键**：标记为不可见
-- **S键**：标记为可见
+### 工作流程
 
-#### 视图控制
-- **滚轮**：缩放图片（以鼠标位置为中心）
-- **右键拖拽**：平移画布
-- **适应窗口**：点击"适应窗口"按钮重置视图
+1. **打开项目**：选择项目根目录或创建新项目
+2. **加载图片**：自动扫描images目录中的图片
+3. **调整姿态**：拖拽关键点到正确位置
+4. **设置可见性**：使用A/S键标记遮挡点
+5. **评分**：为姿态打分（新奇度、互动性、契合度）
+6. **处理特殊情况**：使用Ignore功能跳过不合适的图片
+7. **保存**：自动保存标注数据到annotations目录
 
-### 文件操作
+## 📊 数据格式
 
-#### 加载图片
-1. 点击"打开图片文件夹"按钮
-2. 选择包含图片的文件夹
-3. 工具将自动加载文件夹中的所有图片（支持.jpg, .jpeg, .png, .bmp, .tiff格式）
-
-#### 图片导航
-- **上一张**：点击"上一张"按钮或按左方向键
-- **下一张**：点击"下一张"按钮或按右方向键
-- **自动保存**：切换图片时自动保存当前标注
-
-#### 废弃处理
-- **标记为废弃**：点击"标记为废弃/移动到Ignore"按钮或按Delete键
-- **自动移动**：图片和对应的JSON文件将自动移动到ignore文件夹
-
-### 美学评分
-
-工具提供0-10分的姿态美学评分系统：
-
-- **评分按钮**：点击0-10的数字按钮进行评分
-- **N/A按钮**：表示未评分状态
-- **自动保存**：评分会随标注数据一起保存
-
-### 语音输入功能
-
-工具集成了语音转文字功能，支持中文语音输入：
-
-- **背景描述**：描述图片中的背景环境
-- **人物描述**：描述图片中人物的状态和动作
-
-#### 使用方法
-
-1. **开始录音**：点击"按住说话"按钮或按住按钮不放
-2. **停止录音**：再次点击按钮或松开鼠标
-3. **自动转写**：录音完成后，系统会自动调用Whisper模型进行语音识别
-4. **文本编辑**：识别结果会自动填入文本框，可以进行手动修改
-
-#### 注意事项
-
-- 首次使用时，系统会自动下载Whisper语音识别模型
-- 语音识别需要网络连接（仅首次下载）
-- 支持中文语音识别
-- 可以多次录音，文本会自动追加到现有内容后
-
-### 高级功能
-
-#### 撤销/重做
-- **撤销**：Ctrl+Z或菜单栏"编辑"→"撤销"
-- **重做**：Ctrl+Y或菜单栏"编辑"→"重做"
-
-#### 关键点切换
-- **Tab键**：按顺序切换到下一个关键点
-- **Shift+Tab**：按顺序切换到上一个关键点
-- **列表选择**：在右侧关键点列表中点击选择
-
-#### 骨架显示
-- **显示/隐藏**：点击"隐藏骨架"按钮或按H键切换骨架连线显示
-
-## 数据格式
-
-工具使用JSON格式存储姿态数据，每个图片对应一个同名的JSON文件：
-
+### COCO风格JSON格式
 ```json
-{
-  "score": 7,
-  "background_desc": "街道，天气晴朗，有建筑物",
-  "character_desc": "穿着红色外套，正在跑步",
-  "keypoints": [
-    {
-      "name": "nose",
-      "x": 245.5,
-      "y": 180.3,
-      "visibility": 2
-    },
-    // ... 其他16个关键点
-  ]
-}
+[
+  {
+    "id": 0,
+    "keypoints": [[x1, y1], [x2, y2], ...],
+    "scores": [0.95, 0.87, ...],
+    "visibility": [1, 0, 1, ...],
+    "novelty": 3,
+    "environment_interaction": 2,
+    "person_fit": 4,
+    "skip_reason": ""
+  }
+]
 ```
 
-### 字段说明
+### 关键点顺序
+1. nose
+2. left_eye
+3. right_eye
+4. left_ear
+5. right_ear
+6. left_shoulder
+7. right_shoulder
+8. left_elbow
+9. right_elbow
+10. left_wrist
+11. right_wrist
+12. left_hip
+13. right_hip
+14. left_knee
+15. right_knee
+16. left_ankle
+17. right_ankle
 
-- `score`：姿态美学评分（-1表示未评分，0-10表示评分）
-- `background_desc`：背景描述文本
-- `character_desc`：人物描述文本
-- `keypoints`：17个人体关键点数组
+## 🔧 高级功能
 
-### 关键点定义
+### Ignore分类系统
+支持按以下原因分类跳过图片：
+- **美感不足**：非艺术性人物照片
+- **难以补全**：人物关键部分缺失
+- **背景失真**：inpainting结果异常
+- **比例失调**：人物比例不协调
+- **图像模糊**：分辨率低或质量差
 
-工具支持17个人体关键点：
+### 协作功能
+- 记录每个用户的操作历史
+- 保存上次处理位置
+- 支持多人协作标注
 
-1. nose（鼻子）
-2. left_eye（左眼）
-3. right_eye（右眼）
-4. left_ear（左耳）
-5. right_ear（右耳）
-6. left_shoulder（左肩）
-7. right_shoulder（右肩）
-8. left_elbow（左肘）
-9. right_elbow（右肘）
-10. left_wrist（左腕）
-11. right_wrist（右腕）
-12. left_hip（左髋）
-13. right_hip（右髋）
-14. left_knee（左膝）
-15. right_knee（右膝）
-16. left_ankle（左踝）
-17. right_ankle（右踝）
+### 批量处理
+- 快速跳转到未完成图片
+- 批量导出标注结果
+- 支持项目迁移和结构转换
 
-### 骨架连接
+## 🤝 贡献指南
 
-骨架按以下方式连接：
-- 头部：(0,1), (0,2), (1,3), (2,4)
-- 躯干：(5,6), (5,11), (6,12), (11,12)
-- 左臂：(5,7), (7,9)
-- 右臂：(6,8), (8,10)
-- 左腿：(11,13), (13,15)
-- 右腿：(12,14), (14,15)
+欢迎提交Issue和Pull Request！
 
-## 快捷键参考
+### 开发环境设置
+```bash
+# 克隆仓库
+git clone https://github.com/krustd/PoseEditor.git
+cd PoseEditor
 
-| 功能 | 快捷键 |
-|------|--------|
-| 上一张图片 | ← |
-| 下一张图片 | → |
-| 保存 | Ctrl+S |
-| 撤销 | Ctrl+Z |
-| 重做 | Ctrl+Y |
-| 切换关键点 | Tab/Shift+Tab |
-| 标记为遮挡 | A |
-| 标记为不可见 | D |
-| 标记为可见 | S |
-| 移动到Ignore | Delete |
-| 显示/隐藏骨架 | H |
-| 打开文件夹 | Ctrl+O |
+# 创建虚拟环境
+python -m venv venv
+source venv/bin/activate  # Windows: venv\Scripts\activate
 
-## 工作流程建议
+# 安装开发依赖
+pip install -r requirements.txt
+```
 
-1. **准备数据**：将需要标注的图片放在同一文件夹中
-2. **批量加载**：使用"打开图片文件夹"功能加载所有图片
-3. **标注修正**：
-   - 对于已有标注的图片，工具会自动聚焦到姿态区域
-   - 对于新图片，工具会显示全图，便于从零开始标注
-4. **添加描述**：使用语音输入或文本输入为图片添加背景和人物描述
-5. **评分**：根据姿态质量进行美学评分
-6. **质量筛选**：将质量差的图片标记为废弃，移动到ignore文件夹
-7. **批量处理**：使用快捷键快速切换图片，提高工作效率
+### 构建可执行文件
+```bash
+# 安装PyInstaller
+pip install pyinstaller
 
-## 注意事项
+# 构建可执行文件
+pyinstaller main.py --name=PoseEditor --onefile --windowed --clean --collect-all pyside6
+```
 
-- 工具会自动保存修改，切换图片时无需手动保存
-- 使用ignore功能可以有效地筛选数据质量
-- 评分功能可用于后续的数据质量分析和模型训练
-- 语音输入功能需要麦克风权限，首次使用时会自动下载Whisper模型
-- 支持高分辨率图片的流畅缩放和编辑
-- 描述文本会随标注数据一起保存，可用于后续的文本-图像模型训练
+## 📝 更新日志
 
-## 技术支持
+### v2.1.0
+- 新增多维度评分系统
+- 改进Ignore分类功能
+- 优化用户界面和交互体验
+- 增强inpainting工作流支持
 
-如有问题或建议，请联系开发人员(krust@foxmail.com)。
+### v2.0.0
+- 重构为项目结构管理
+- 添加协作功能支持
+- 优化性能和稳定性
+
+## 📄 许可证
+
+本项目采用 MIT 许可证 - 查看 [LICENSE](LICENSE) 文件了解详情。
+
+## 🙏 致谢
+
+- [PySide6](https://www.riverbankcomputing.com/software/pyqt/) - Qt for Python
+- [COCO Dataset](https://cocodataset.org/) - 姿态标注格式参考
+
+## 📞 联系方式
+
+- 项目主页：https://github.com/krustd/PoseEditor
+- 问题反馈：https://github.com/krustd/PoseEditor/issues
+- 邮箱：[your-email@example.com]
+
+---
+
+如果这个项目对您有帮助，请给我们一个⭐️！
