@@ -31,7 +31,11 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.9"
-          cache: "pip"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
 
       # --- Linux 依赖 ---
       - name: Install Linux dependencies
@@ -40,17 +44,15 @@ jobs:
           sudo apt-get update --fix-missing
           sudo apt-get install -y libegl1 libxkbcommon0
 
-      # --- Python 依赖 ---
-      - name: Install Python dependencies
+      # --- Python 依赖（uv） ---
+      - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt --default-timeout=100
-          pip install pyinstaller
+          uv sync --locked --group dev
 
       # --- 打包 ---
       - name: Build with PyInstaller
         run: |
-          pyinstaller main.py --name=PoseEditor-${{ matrix.target }} --onefile --windowed --clean --collect-all pyside6
+          uv run pyinstaller src/poseeditor/__main__.py --name=PoseEditor-${{ matrix.target }} --onefile --windowed --clean --collect-all pyside6
 
       # --- Linux 压缩 ---
       - name: Zip Linux Build

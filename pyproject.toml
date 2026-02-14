@@ -1,11 +1,26 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "poseeditor"
-version = "3.0.4"
-description = "Add your description here"
+version = "3.0.5"
+description = "krust and mcb's workout"
 readme = "README.md"
 requires-python = ">=3.9,<3.10"
 dependencies = [
-    "numpy>=2.0.2",
     "pyside6>=6.10.1",
-    "pyinstaller>=6.0.0",
 ]
+
+[project.scripts]
+poseeditor = "poseeditor.app:main"
+
+[dependency-groups]
+dev = [
+    "pyinstaller>=6.0.0",
+    "pytest>=8.4.2",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["poseeditor*"]
