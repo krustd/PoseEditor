@@ -739,7 +739,7 @@ class PoseEditor(QMainWindow):
     # ============================================================
 
     def _move_corrupt_to_ignore(self):
-        """将当前损坏图片（及对应标注）移入 Ignore/图片损坏 并加载下一张。"""
+        """将当前损坏图片移入 Ignore/图片损坏，在JSON中标记损坏原因并加载下一张。"""
         if not self.current_image_path:
             return
         image_path = Path(self.current_image_path)
@@ -750,14 +750,20 @@ class PoseEditor(QMainWindow):
         ignore_dir.mkdir(parents=True, exist_ok=True)
 
         try:
-            # 移动图片
+            # 在JSON中标记图片损坏原因
+            json_path = self._get_annotation_path(image_path)
+            self.canvas.pose_data.skip_reason = "图片损坏"
+            
+            # 保存标注（确保损坏原因落盘）- 保留在原位置
+            data = [self.canvas.pose_data.to_dict()]
+            json_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(json_path, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+
+            # 只移动图片，不移动JSON标注文件
             shutil.move(str(image_path), str(ignore_dir / image_path.name))
 
-            # 移动对应标注文件（如果有）
-            for json_path in self._collect_json_candidates(image_path):
-                if json_path.exists():
-                    shutil.move(str(json_path), str(ignore_dir / json_path.name))
-                    break
+            print(f"Moved corrupt image {image_path.name} to ignore/图片损坏/ (JSON kept at original location with damage reason)")
 
         except Exception as e:
             print(f"Warning: failed to move corrupt image: {e}")
@@ -777,7 +783,7 @@ class PoseEditor(QMainWindow):
         self.load_current_image()
 
     def move_to_ignore_category(self, category: str, custom_reason: str = ""):
-        """将当前图片和标注移动到 Ignore/<category> 文件夹。"""
+        """将当前图片移动到 Ignore/<category> 文件夹，但保留JSON标注文件在原位置。"""
         if not self.current_image_path:
             return
 
@@ -797,21 +803,17 @@ class PoseEditor(QMainWindow):
             reason_text = custom_reason if custom_reason else category
             self.canvas.pose_data.skip_reason = reason_text
 
-            # 保存标注（确保理由落盘）
+            # 保存标注（确保理由落盘）- 保留在原位置
             data = [self.canvas.pose_data.to_dict()]
             # 确保标注目录存在
             json_path.parent.mkdir(parents=True, exist_ok=True)
             with open(json_path, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
 
-            # 移动图片
+            # 只移动图片，不移动JSON标注文件
             shutil.move(str(image_path), str(ignore_dir / image_path.name))
 
-            # 移动标注文件
-            if json_path.exists():
-                shutil.move(str(json_path), str(ignore_dir / json_path.name))
-
-            print(f"Moved {image_path.name} to ignore/{folder_name}/")
+            print(f"Moved {image_path.name} to ignore/{folder_name}/ (JSON kept at original location)")
 
             # 从列表中移除
             del self.image_files[self.current_index]
