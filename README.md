@@ -53,7 +53,18 @@
 
 下载后直接运行即可开始使用，这是最简单快捷的方式！
 
-#### 方法2：从源码安装
+#### 方法2：使用uv运行（推荐）
+如果您已安装uv，可以直接运行项目：
+```bash
+# 克隆仓库
+git clone https://github.com/krustd/PoseEditor.git
+cd PoseEditor
+
+# 使用uv运行（推荐方式）
+uv run -m poseeditor
+```
+
+#### 方法3：从源码安装
 如果您需要修改源码或开发，可以从源码安装：
 ```bash
 # 克隆仓库
@@ -67,7 +78,7 @@ pip install -r requirements.txt
 python main.py
 ```
 
-#### 方法3：使用pip安装
+#### 方法4：使用pip安装
 ```bash
 pip install poseeditor
 ```
@@ -182,6 +193,21 @@ your_project/
 欢迎提交Issue和Pull Request！
 
 ### 开发环境设置
+
+#### 使用uv（推荐）
+```bash
+# 克隆仓库
+git clone https://github.com/krustd/PoseEditor.git
+cd PoseEditor
+
+# 使用uv运行项目
+uv run -m poseeditor
+
+# 安装开发依赖
+uv sync --group dev
+```
+
+#### 传统方式
 ```bash
 # 克隆仓库
 git clone https://github.com/krustd/PoseEditor.git
@@ -196,6 +222,14 @@ pip install -r requirements.txt
 ```
 
 ### 构建可执行文件
+
+#### 使用uv
+```bash
+# 使用uv安装PyInstaller并构建
+uv run pyinstaller src/poseeditor/__main__.py --name=PoseEditor --onefile --windowed --clean --collect-all pyside6
+```
+
+#### 传统方式
 ```bash
 # 安装PyInstaller
 pip install pyinstaller
