@@ -183,7 +183,8 @@ class PoseEditor(QMainWindow):
         ignore_btn_style = """
             QPushButton {
                 background-color: #fff3cd; border: 1px solid #ffc107;
-                padding: 4px 6px; color: #856404; font-size: 11px;
+                padding: 8px 12px; color: #856404; font-size: 13px; font-weight: bold;
+                min-height: 30px;
             }
             QPushButton:hover { background-color: #ffc107; color: white; }
         """
@@ -368,17 +369,6 @@ class PoseEditor(QMainWindow):
         inpaint_layout.addWidget(self.inpaint_filename_label)
 
         layout.addWidget(inpaint_group)
-
-        # --- 帮助说明（放在最底部，紧凑） ---
-        help_text = QLabel(
-            "左键:选中/拖拽 Ctrl+点击:瞬移 | 右键:平移 滚轮:缩放\n"
-            "S:遮挡✕ D:可见● 空格:切换 | Tab/Shift+Tab:切换点\n"
-            "←→:翻页 O:下个需处理 | W:聚焦关键点 E:适应全图\n"
-            "H:骨架 1~5:丢弃 Del:选择丢弃 | Ctrl+Z/Y:撤销/重做"
-        )
-        help_text.setStyleSheet("color: #777; font-size: 10px;")
-        help_text.setWordWrap(True)
-        layout.addWidget(help_text)
 
         return panel
 

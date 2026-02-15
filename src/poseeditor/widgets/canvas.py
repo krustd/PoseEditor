@@ -370,13 +370,13 @@ class Canvas(QWidget):
         new_scale = self.scale * scale_factor
 
         if 0.1 <= new_scale <= 20.0:
-            self.scale = new_scale
-            image_pos_after = self.widget_to_image(mouse_pos)
+            # 计算缩放前后的差异，并调整偏移量以保持鼠标位置不变
             offset_delta = QPointF(
-                (image_pos_before.x() - image_pos_after.x()) * self.scale,
-                (image_pos_before.y() - image_pos_after.y()) * self.scale,
+                (image_pos_before.x() * (new_scale - self.scale)),
+                (image_pos_before.y() * (new_scale - self.scale)),
             )
-            self.offset += offset_delta
+            self.scale = new_scale
+            self.offset -= offset_delta
             self.update()
 
     def keyPressEvent(self, event: QKeyEvent):
