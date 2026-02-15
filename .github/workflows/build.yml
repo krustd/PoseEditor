@@ -75,19 +75,19 @@ jobs:
       - name: Build Windows executable
         if: matrix.os == 'windows-latest'
         run: |
-          uv run pyinstaller src/poseeditor/__main__.py --name=PoseEditor-windows --onefile --windowed --clean --collect-all pyside6
+          uv run pyinstaller main.py --name=PoseEditor-windows --onefile --windowed --clean --collect-all pyside6
 
       # macOS: 生成 .app 后压缩分发。
       - name: Build macOS app bundle
         if: matrix.os == 'macos-latest'
         run: |
-          uv run pyinstaller src/poseeditor/__main__.py --name=PoseEditor-macos --windowed --clean --collect-all pyside6
+          uv run pyinstaller main.py --name=PoseEditor-macos --windowed --clean --collect-all pyside6
 
       # Linux: 先生成单文件可执行体，后续封装为 AppImage。
       - name: Build Linux executable
         if: matrix.os == 'ubuntu-latest'
         run: |
-          uv run pyinstaller src/poseeditor/__main__.py --name=PoseEditor-linux --onefile --windowed --clean --collect-all pyside6
+          uv run pyinstaller main.py --name=PoseEditor-linux --onefile --windowed --clean --collect-all pyside6
 
       # 将 macOS .app 打包为 zip，方便直接下载使用。
       - name: Package macOS app
