@@ -1,6 +1,12 @@
 name: Build and Release
 
 on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Tag to build and release (e.g. v4.0.0)"
+        required: false
+        default: ""
   push:
     tags:
       - "v*"
@@ -8,9 +14,16 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: release-${{ github.event.inputs.release_tag || github.ref }}
+  cancel-in-progress: false
+
+env:
+  PYTHON_VERSION: "3.9"
+
 jobs:
   build:
-    name: Build packages
+    name: Build packages (${{ matrix.target }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -24,55 +37,154 @@ jobs:
             target: linux
 
     steps:
+      # 手动触发且指定 tag 时，按该 tag 的代码构建。
+      - name: Checkout code (tag for manual release)
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.release_tag != ''
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.release_tag }}
+
+      # 其他场景按默认 ref 构建（tag push 或 main 手动触发）。
       - name: Checkout code
+        if: github.event_name != 'workflow_dispatch' || github.event.inputs.release_tag == ''
         uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.9"
-          cache: "pip"
+          python-version: ${{ env.PYTHON_VERSION }}
 
-      # --- Linux 依赖 ---
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      # Linux 运行时与 AppImage 打包依赖。
       - name: Install Linux dependencies
         if: matrix.os == 'ubuntu-latest'
         run: |
           sudo apt-get update --fix-missing
-          sudo apt-get install -y libegl1 libxkbcommon0
+          sudo apt-get install -y libegl1 libxkbcommon0 libglib2.0-0 patchelf wget
 
-      # --- Python 依赖 ---
-      - name: Install Python dependencies
+      # Python 依赖（含打包工具）。
+      - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt --default-timeout=100
-          pip install pyinstaller
+          uv sync --locked --group dev
 
-      # --- 打包 ---
-      - name: Build with PyInstaller
+      # Windows: 生成单文件 exe，开箱即用。
+      - name: Build Windows executable
+        if: matrix.os == 'windows-latest'
         run: |
-          pyinstaller main.py --name=PoseEditor-${{ matrix.target }} --onefile --windowed --clean --collect-all pyside6
+          uv run pyinstaller src/poseeditor/__main__.py --name=PoseEditor-windows --onefile --windowed --clean --collect-all PySide6
 
-      # --- Linux 压缩 ---
-      - name: Zip Linux Build
+      # macOS: 生成 .app 后压缩分发。
+      - name: Build macOS app bundle
+        if: matrix.os == 'macos-latest'
+        run: |
+          uv run pyinstaller src/poseeditor/__main__.py --name=PoseEditor-macos --windowed --clean --collect-all PySide6
+
+      # Linux: 先生成单文件可执行体，后续封装为 AppImage。
+      - name: Build Linux executable
         if: matrix.os == 'ubuntu-latest'
         run: |
-          cd dist
-          chmod +x PoseEditor-linux
-          tar -czvf PoseEditor-linux.tar.gz PoseEditor-linux
+          uv run pyinstaller src/poseeditor/__main__.py --name=PoseEditor-linux --onefile --windowed --clean --collect-all PySide6
 
-      # --- macOS 压缩 ---
-      - name: Zip macOS Build
+      # 将 macOS .app 打包为 zip，方便直接下载使用。
+      - name: Package macOS app
         if: matrix.os == 'macos-latest'
         run: |
           cd dist
-          zip -r PoseEditor-macos.zip PoseEditor-macos.app || zip -r PoseEditor-macos.zip PoseEditor-macos
+          if [ -d PoseEditor-macos.app ]; then
+            ditto -c -k --sequesterRsrc --keepParent PoseEditor-macos.app PoseEditor-macos.app.zip
+          else
+            zip -r PoseEditor-macos.app.zip PoseEditor-macos
+          fi
 
-      # --- 上传发布 ---
+      # 将 Linux 可执行体封装为 AppImage。
+      - name: Package Linux AppImage
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          mkdir -p AppDir/usr/bin
+          mkdir -p AppDir/usr/share/applications
+          mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
+
+          cp dist/PoseEditor-linux AppDir/usr/bin/PoseEditor
+          chmod +x AppDir/usr/bin/PoseEditor
+
+          cat > AppDir/AppRun <<'EOF'
+          #!/bin/sh
+          HERE="$(dirname "$(readlink -f "$0")")"
+          exec "$HERE/usr/bin/PoseEditor" "$@"
+          EOF
+          chmod +x AppDir/AppRun
+
+          cat > AppDir/usr/share/applications/poseeditor.desktop <<'EOF'
+          [Desktop Entry]
+          Type=Application
+          Name=PoseEditor
+          Exec=PoseEditor
+          Icon=poseeditor
+          Terminal=false
+          Categories=Graphics;
+          EOF
+
+          cat > AppDir/usr/share/icons/hicolor/256x256/apps/poseeditor.png.base64 <<'EOF'
+          iVBORw0KGgoAAAANSUhEUgAAAQAAAAEACAIAAADTED8xAAAABnRSTlMAAAAAAABupgeRAAAAf0lEQVR4nO3BMQEAAADCoPVP7WENoAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgB8GxAABfN2tNwAAAABJRU5ErkJggg==
+          EOF
+          base64 -d AppDir/usr/share/icons/hicolor/256x256/apps/poseeditor.png.base64 > AppDir/usr/share/icons/hicolor/256x256/apps/poseeditor.png
+          rm AppDir/usr/share/icons/hicolor/256x256/apps/poseeditor.png.base64
+
+          cp AppDir/usr/share/icons/hicolor/256x256/apps/poseeditor.png AppDir/poseeditor.png
+          ln -sf usr/share/applications/poseeditor.desktop AppDir/poseeditor.desktop
+          ln -sf usr/share/icons/hicolor/256x256/apps/poseeditor.png AppDir/.DirIcon
+
+          wget -q https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage -O appimagetool.AppImage
+          chmod +x appimagetool.AppImage
+          APPIMAGE_EXTRACT_AND_RUN=1 ARCH=x86_64 ./appimagetool.AppImage AppDir dist/PoseEditor-linux.AppImage
+          chmod +x dist/PoseEditor-linux.AppImage
+
+      # 先按平台上传制品，发布阶段统一聚合，避免矩阵并发上传冲突。
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: poseeditor-${{ matrix.target }}
+          if-no-files-found: error
+          path: |
+            dist/*.exe
+            dist/*.app.zip
+            dist/*.AppImage
+
+  release:
+    name: Publish Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && github.event.inputs.release_tag != '')
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: poseeditor-*
+          path: release-assets
+          merge-multiple: true
+
+      # 统一解析 release 使用的 tag，兼容 tag push 与手动触发。
+      - name: Resolve release tag
+        id: release_tag
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ github.event.inputs.release_tag }}" ]; then
+            echo "value=${{ github.event.inputs.release_tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Upload Release Assets
         uses: softprops/action-gh-release@v2
-        if: startsWith(github.ref, 'refs/tags/')
         with:
+          tag_name: ${{ steps.release_tag.outputs.value }}
+          fail_on_unmatched_files: true
+          generate_release_notes: true
           files: |
-            dist/*.exe
-            dist/*.zip
-            dist/*.tar.gz
+            release-assets/*.exe
+            release-assets/*.app.zip
+            release-assets/*.AppImage
