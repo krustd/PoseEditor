@@ -66,6 +66,9 @@ class PoseData:
         # 跳过原因
         self.skip_reason = ""  # 空字符串表示不跳过，否则记录跳过原因
 
+        # 耗时记录（秒）
+        self.time_spent = 0.0
+
         # 兼容旧格式
         self.score = -1
 
@@ -79,6 +82,7 @@ class PoseData:
         new_pose.environment_interaction = self.environment_interaction
         new_pose.person_fit = self.person_fit
         new_pose.skip_reason = self.skip_reason
+        new_pose.time_spent = self.time_spent
         return new_pose
 
     def _init_keypoints(self) -> List[Keypoint]:
@@ -97,6 +101,7 @@ class PoseData:
             "environment_interaction": self.environment_interaction,
             "person_fit": self.person_fit,
             "skip_reason": self.skip_reason,
+            "time_spent": round(self.time_spent, 1),
         }
 
     @classmethod
@@ -111,6 +116,7 @@ class PoseData:
         )
         pose.person_fit = data.get("person_fit", -1)
         pose.skip_reason = data.get("skip_reason", "")
+        pose.time_spent = data.get("time_spent", 0.0)
         pose.score = data.get("score", -1)
 
         raw_kps = data.get("keypoints", [])

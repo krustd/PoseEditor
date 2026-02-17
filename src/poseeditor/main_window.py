@@ -3,6 +3,7 @@
 import getpass
 import json
 import shutil
+import time
 import zipfile
 from datetime import datetime
 from pathlib import Path
@@ -55,6 +56,7 @@ class PoseEditor(QMainWindow):
         self.current_annotation_path = None
         self.image_files = []
         self.current_index = 0
+        self._image_start_time: Optional[float] = None  # 当前图片开始计时时间
 
         # 项目文件夹路径
         self.project_root = None  # 项目根目录
@@ -1033,6 +1035,9 @@ class PoseEditor(QMainWindow):
         self.canvas.set_image(image)
         self.load_annotation()
 
+        # 开始计时
+        self._image_start_time = time.monotonic()
+
         # 加载完数据后，重置撤销栈
         self.canvas.undo_stack.clear()
         self.update_status()
@@ -1108,9 +1113,17 @@ class PoseEditor(QMainWindow):
             pose_data.person_fit,
         )
 
+    def _accumulate_time(self):
+        """将本次浏览耗时累加到当前 pose_data 上。"""
+        if self._image_start_time is not None:
+            elapsed = time.monotonic() - self._image_start_time
+            self.canvas.pose_data.time_spent += elapsed
+            self._image_start_time = time.monotonic()
+
     def save_current(self):
         if not self.current_annotation_path:
             return
+        self._accumulate_time()
         try:
             # 确保目录存在
             ann_path = Path(self.current_annotation_path)
