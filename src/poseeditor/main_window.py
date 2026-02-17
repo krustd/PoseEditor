@@ -3,6 +3,7 @@
 import getpass
 import json
 import shutil
+import zipfile
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -11,6 +12,7 @@ from PySide6.QtCore import QEvent, Qt
 from PySide6.QtGui import QAction, QImage, QKeyEvent, QKeySequence, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QButtonGroup,
+    QDialog,
     QFileDialog,
     QFrame,
     QGridLayout,
@@ -23,6 +25,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QSizePolicy,
     QSplitter,
     QStatusBar,
@@ -116,6 +119,11 @@ class PoseEditor(QMainWindow):
         self.save_btn.setToolTip("Ctrl+S")
         self.save_btn.clicked.connect(self.save_current)
         proj_row1.addWidget(self.save_btn)
+
+        self.export_btn = QPushButton("📦 导出")
+        self.export_btn.setToolTip("将标注JSON文件夹打包为zip导出")
+        self.export_btn.clicked.connect(self.export_annotations)
+        proj_row1.addWidget(self.export_btn)
 
         layout.addLayout(proj_row1)
 
@@ -270,7 +278,18 @@ class PoseEditor(QMainWindow):
         detail_layout.setSpacing(3)
 
         # 姿势新奇度
-        detail_layout.addWidget(QLabel("姿势新奇度:"), 0, 0)
+        novelty_label_w = QWidget()
+        novelty_label_l = QHBoxLayout(novelty_label_w)
+        novelty_label_l.setContentsMargins(0, 0, 0, 0)
+        novelty_label_l.setSpacing(2)
+        novelty_label_l.addWidget(QLabel("姿势新奇度:"))
+        novelty_help_btn = QPushButton("?")
+        novelty_help_btn.setFixedSize(20, 20)
+        novelty_help_btn.setStyleSheet("QPushButton { font-size: 11px; font-weight: bold; border: 1px solid #aaa; border-radius: 10px; background: #e8e8e8; } QPushButton:hover { background: #d0d0d0; }")
+        novelty_help_btn.clicked.connect(lambda: self._show_score_help("novelty"))
+        novelty_label_l.addWidget(novelty_help_btn)
+        novelty_label_l.addStretch()
+        detail_layout.addWidget(novelty_label_w, 0, 0)
         self.novelty_buttons = {}
         self.novelty_btn_group = QButtonGroup(self)
         self.novelty_btn_group.setExclusive(False)
@@ -293,7 +312,18 @@ class PoseEditor(QMainWindow):
             self.novelty_buttons[i] = btn
 
         # 环境互动性
-        detail_layout.addWidget(QLabel("环境互动性:"), 1, 0)
+        env_label_w = QWidget()
+        env_label_l = QHBoxLayout(env_label_w)
+        env_label_l.setContentsMargins(0, 0, 0, 0)
+        env_label_l.setSpacing(2)
+        env_label_l.addWidget(QLabel("环境互动性:"))
+        env_help_btn = QPushButton("?")
+        env_help_btn.setFixedSize(20, 20)
+        env_help_btn.setStyleSheet("QPushButton { font-size: 11px; font-weight: bold; border: 1px solid #aaa; border-radius: 10px; background: #e8e8e8; } QPushButton:hover { background: #d0d0d0; }")
+        env_help_btn.clicked.connect(lambda: self._show_score_help("environment_interaction"))
+        env_label_l.addWidget(env_help_btn)
+        env_label_l.addStretch()
+        detail_layout.addWidget(env_label_w, 1, 0)
         self.env_buttons = {}
         self.env_btn_group = QButtonGroup(self)
         self.env_btn_group.setExclusive(False)
@@ -316,7 +346,18 @@ class PoseEditor(QMainWindow):
             self.env_buttons[i] = btn
 
         # 人物契合度
-        detail_layout.addWidget(QLabel("人物契合度:"), 2, 0)
+        person_label_w = QWidget()
+        person_label_l = QHBoxLayout(person_label_w)
+        person_label_l.setContentsMargins(0, 0, 0, 0)
+        person_label_l.setSpacing(2)
+        person_label_l.addWidget(QLabel("人物契合度:"))
+        person_help_btn = QPushButton("?")
+        person_help_btn.setFixedSize(20, 20)
+        person_help_btn.setStyleSheet("QPushButton { font-size: 11px; font-weight: bold; border: 1px solid #aaa; border-radius: 10px; background: #e8e8e8; } QPushButton:hover { background: #d0d0d0; }")
+        person_help_btn.clicked.connect(lambda: self._show_score_help("person_fit"))
+        person_label_l.addWidget(person_help_btn)
+        person_label_l.addStretch()
+        detail_layout.addWidget(person_label_w, 2, 0)
         self.person_buttons = {}
         self.person_btn_group = QButtonGroup(self)
         self.person_btn_group.setExclusive(False)
@@ -423,6 +464,67 @@ class PoseEditor(QMainWindow):
                 self.canvas.update()
                 self.update_status()
                 break
+
+    _SCORE_HELP_TEXT = {
+        "novelty": (
+            "姿势新奇度 (Pose Novelty)",
+            "<b>0分</b>：完全无新意，是最常见、最刻板的姿势，如正对镜头的僵硬站立、双手自然下垂的「证件照」站姿。<br><br>"
+            "<b>1分</b>：姿势常规，略有变化但仍在常见范围内，如侧身站立、单手插兜等，缺乏记忆点。<br><br>"
+            "<b>2分</b>：有一定新意，姿势经过设计，如侧身回头、倚靠物体等，比普通姿势更有设计感。<br><br>"
+            "<b>3分</b>：姿势新颖，有明显的创意和设计感，如动态抓拍、利用道具摆出独特造型，能让人眼前一亮。<br><br>"
+            "<b>4分</b>：姿势极具创意，打破常规，如高难度动作、与环境融合的艺术化姿势，视觉冲击力强。<br><br>"
+            "<b>5分</b>：姿势独一无二，完全原创，能精准表达人物个性与场景氛围，成为标志性的经典姿势。"
+        ),
+        "environment_interaction": (
+            "环境互动性 (Environmental Interaction)",
+            "<b>0分</b>：完全无互动，人物与环境割裂，如在户外却像在室内一样僵硬站立，与周围景物无任何关联。<br><br>"
+            "<b>1分</b>：轻微互动，如手自然垂在身侧，或眼神看向环境，但没有实质性的接触或动作。<br><br>"
+            "<b>2分</b>：有明显互动，如手扶栏杆、脚踩台阶、轻触花草等，人物与环境产生了物理或视觉上的联系。<br><br>"
+            "<b>3分</b>：深度互动，如坐在台阶上、倚靠大树、与宠物玩耍等，人物融入环境，成为场景的一部分。<br><br>"
+            "<b>4分</b>：主动互动，如在沙滩上奔跑、在花丛中轻嗅花香、与路人互动等，动作自然且充满活力。<br><br>"
+            "<b>5分</b>：完美融合，人物与环境的互动浑然天成，如在雨中撑伞漫步、在海边踏浪，姿态与场景氛围高度统一。"
+        ),
+        "person_fit": (
+            "人物契合度 (Persona Fit)",
+            "<b>0分</b>：完全不契合，姿势与人物的年龄、身份、性格严重不符，如老人摆出夸张的街舞动作。<br><br>"
+            "<b>1分</b>：基本不契合，姿势略显违和，如内向的人摆出过于外放的姿势，显得刻意和不自然。<br><br>"
+            "<b>2分</b>：勉强契合，姿势与人物有一定关联，但仍有刻意感，如职场人摆出休闲的姿势，略显生硬。<br><br>"
+            "<b>3分</b>：较为契合，姿势能体现人物的部分特质，如文艺青年倚靠书架，整体自然但仍有设计痕迹。<br><br>"
+            "<b>4分</b>：高度契合，姿势与人物的气质、身份、性格完美匹配，如运动员摆出充满力量感的姿势，浑然天成。<br><br>"
+            "<b>5分</b>：极致契合，姿势成为人物的标志性表达，如舞者的经典舞姿、艺术家的沉思姿态，一眼就能认出其身份。"
+        ),
+    }
+
+    def _show_score_help(self, score_type: str):
+        """弹出评分参考细则对话框。"""
+        title, body = self._SCORE_HELP_TEXT[score_type]
+        dlg = QDialog(self)
+        dlg.setWindowTitle(title)
+        dlg.setFixedSize(520, 420)
+        dlg_layout = QVBoxLayout(dlg)
+        dlg_layout.setContentsMargins(16, 16, 16, 16)
+
+        content = QLabel(body)
+        content.setWordWrap(True)
+        content.setTextFormat(Qt.RichText)
+        content.setStyleSheet("font-size: 13px; line-height: 1.6;")
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setWidget(content)
+        scroll.setStyleSheet("QScrollArea { border: none; }")
+        dlg_layout.addWidget(scroll)
+
+        close_btn = QPushButton("关闭")
+        close_btn.setFixedWidth(80)
+        close_btn.clicked.connect(dlg.accept)
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+        btn_layout.addWidget(close_btn)
+        btn_layout.addStretch()
+        dlg_layout.addLayout(btn_layout)
+
+        dlg.exec()
 
     def _on_exclusive_score_click(
         self,
@@ -1024,6 +1126,52 @@ class PoseEditor(QMainWindow):
             self.status_bar.showMessage(f"已保存: {ann_path.name}", 2000)
         except Exception as e:
             QMessageBox.warning(self, "错误", f"保存失败: {e}")
+
+    def export_annotations(self):
+        """将标注JSON文件夹打包为zip导出。"""
+        if not self.project_root or not self.json_dir:
+            QMessageBox.warning(self, "提示", "请先打开一个项目。")
+            return
+
+        json_path = Path(self.json_dir)
+        json_files = list(json_path.glob("*.json"))
+        if not json_files:
+            QMessageBox.warning(self, "提示", "标注文件夹中没有JSON文件，无法导出。")
+            return
+
+        # 先保存当前标注
+        self.save_current()
+
+        # 输入导出名称
+        default_name = Path(self.project_root).name
+        name, ok = QInputDialog.getText(
+            self, "导出标注", "请输入导出文件名:", text=default_name
+        )
+        if not ok or not name.strip():
+            return
+        name = name.strip()
+
+        # 选择保存位置
+        save_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "选择保存位置",
+            str(Path(self.project_root) / f"{name}.zip"),
+            "ZIP 文件 (*.zip)",
+        )
+        if not save_path:
+            return
+
+        try:
+            with zipfile.ZipFile(save_path, "w", zipfile.ZIP_DEFLATED) as zf:
+                for f in sorted(json_files):
+                    zf.write(f, f"{name}/{f.name}")
+            QMessageBox.information(
+                self,
+                "导出成功",
+                f"已导出 {len(json_files)} 个标注文件到：\n{save_path}",
+            )
+        except Exception as e:
+            QMessageBox.warning(self, "导出失败", f"打包过程出错：{e}")
 
     def prev_image(self):
         if self.image_files and self.current_index > 0:
