@@ -194,7 +194,7 @@ class Canvas(QWidget):
         for start_idx, end_idx in self.skeleton:
             start_kp = self.pose_data.keypoints[start_idx]
             end_kp = self.pose_data.keypoints[end_idx]
-            if (start_kp.x > 1 and start_kp.y > 1) and (end_kp.x > 1 and end_kp.y > 1):
+            if start_kp.visibility > 0 or end_kp.visibility > 0:
                 color = self.SKELETON_COLORS.get(
                     (start_idx, end_idx), QColor(100, 200, 100, 150)
                 )
@@ -303,8 +303,8 @@ class Canvas(QWidget):
                     )
                     old_state = self.selected_keypoint.copy()
 
-                    self.selected_keypoint.x = max(0, image_pos.x())
-                    self.selected_keypoint.y = max(0, image_pos.y())
+                    self.selected_keypoint.x = image_pos.x()
+                    self.selected_keypoint.y = image_pos.y()
                     self.selected_keypoint.visibility = 1
 
                     new_state = self.selected_keypoint.copy()
@@ -328,8 +328,8 @@ class Canvas(QWidget):
     def mouseMoveEvent(self, event: QMouseEvent):
         if self.dragging and self.selected_keypoint:
             image_pos = self.widget_to_image(event.pos())
-            self.selected_keypoint.x = max(0, image_pos.x())
-            self.selected_keypoint.y = max(0, image_pos.y())
+            self.selected_keypoint.x = image_pos.x()
+            self.selected_keypoint.y = image_pos.y()
             self.update()
         elif self.panning:
             delta = event.pos() - self.last_pos
