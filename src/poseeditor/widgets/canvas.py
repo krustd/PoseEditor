@@ -194,14 +194,13 @@ class Canvas(QWidget):
         for start_idx, end_idx in self.skeleton:
             start_kp = self.pose_data.keypoints[start_idx]
             end_kp = self.pose_data.keypoints[end_idx]
-            if start_kp.visibility > 0 or end_kp.visibility > 0:
-                color = self.SKELETON_COLORS.get(
-                    (start_idx, end_idx), QColor(100, 200, 100, 150)
-                )
-                painter.setPen(QPen(color, 2))
-                painter.drawLine(
-                    QPointF(start_kp.x, start_kp.y), QPointF(end_kp.x, end_kp.y)
-                )
+            color = self.SKELETON_COLORS.get(
+                (start_idx, end_idx), QColor(100, 200, 100, 150)
+            )
+            painter.setPen(QPen(color, 2))
+            painter.drawLine(
+                QPointF(start_kp.x, start_kp.y), QPointF(end_kp.x, end_kp.y)
+            )
         painter.restore()
 
     KEYPOINT_COLORS = {
